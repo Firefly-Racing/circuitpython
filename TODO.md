@@ -1,4 +1,4 @@
-# TODO:
+# TODO
 
 - [ ] Add CAN FD support for the Feather M4  
 - [ ] Add CAN FD support for esp32  
