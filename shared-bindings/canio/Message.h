@@ -20,3 +20,8 @@ void common_hal_canio_message_set_extended(canio_message_obj_t *self, bool exten
 int common_hal_canio_message_get_id(const canio_message_obj_t *self);
 void common_hal_canio_message_set_id(canio_message_obj_t *self, int id);
 size_t common_hal_canio_message_get_length(const canio_message_obj_t *self);
+
+bool common_hal_canio_message_get_fd(const canio_message_obj_t *self);
+void common_hal_canio_message_set_fd(canio_message_obj_t *self, bool fd);
+bool common_hal_canio_message_get_brs(const canio_message_obj_t *self);
+void common_hal_canio_message_set_brs(canio_message_obj_t *self, bool brs);

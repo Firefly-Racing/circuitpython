@@ -348,6 +348,8 @@ mp_obj_t common_hal_canio_listener_receive(canio_listener_obj_t *self) {
     int index = self->hw->RXFS.bit.F0GI;
     canio_can_rx_fifo_t *hw_message = &self->fifo[index];
     bool rtr = hw_message->rxf0.bit.RTR;
+    bool fd = hw_message->rxf1.bit.FDF;
+    uint8_t dlc = hw_message->rxf1.bit.DLC;
     canio_message_obj_t *message =
         mp_obj_malloc(canio_message_obj_t, rtr ? &canio_remote_transmission_request_type : &canio_message_type);
     message->extended = hw_message->rxf0.bit.XTD;
@@ -356,7 +358,13 @@ mp_obj_t common_hal_canio_listener_receive(canio_listener_obj_t *self) {
     } else {
         message->id = hw_message->rxf0.bit.ID >> 18; // short ids are left-justified
     }
-    message->size = hw_message->rxf1.bit.DLC;
+    message->fd = fd;
+    message->brs = fd && hw_message->rxf1.bit.BRS;
+    if (fd) {
+        message->size = canio_dlc_to_len(dlc);
+    } else {
+        message->size = dlc > 8 ? 8 : dlc; // classic CAN: DLC 9..15 means 8 bytes
+    }
     if (!rtr) {
         memcpy(message->data, hw_message->data, message->size);
     }

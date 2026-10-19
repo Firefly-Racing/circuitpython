@@ -30,3 +30,7 @@ void common_hal_canio_can_deinit(canio_can_obj_t *self);
 void common_hal_canio_can_restart(canio_can_obj_t *self);
 void common_hal_canio_can_send(canio_can_obj_t *self, mp_obj_t message);
 void common_hal_canio_reset(void);
+
+void common_hal_canio_can_construct_fd(canio_can_obj_t *self, const mcu_pin_obj_t *tx, const mcu_pin_obj_t *rx, int baudrate, bool loopback, bool silent, bool fd, int data_baudrate);
+bool common_hal_canio_can_fd_get(canio_can_obj_t *self);
+int common_hal_canio_can_data_baudrate_get(canio_can_obj_t *self);

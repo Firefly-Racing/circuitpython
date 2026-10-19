@@ -29,6 +29,8 @@
 //|         loopback: bool = False,
 //|         silent: bool = False,
 //|         auto_restart: bool = False,
+//|         fd: bool = False,
+//|         data_baudrate: int = 0,
 //|     ) -> None:
 //|         """A common shared-bus protocol.  The rx and tx pins are generally
 //|         connected to a transceiver which controls the H and L pins on a
@@ -40,11 +42,13 @@
 //|         :param bool loopback: When True  the ``rx`` pin's value is ignored, and the device receives the packets it sends.
 //|         :param bool silent: When True the ``tx`` pin is always driven to the high logic level.  This mode can be used to "sniff" a CAN bus without interfering.
 //|         :param bool auto_restart: If True, will restart communications after entering bus-off state
+//|         :param bool fd: Enable CAN FD (only on supported ports).
+//|         :param int data_baudrate: Bit rate of the FD data phase in Hz. 0 means same as ``baudrate`` (no bit rate switching).
 //|         """
 //|         ...
 //|
 static mp_obj_t canio_can_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *all_args) {
-    enum { ARG_tx, ARG_rx, ARG_baudrate, ARG_loopback, ARG_silent, ARG_auto_restart, NUM_ARGS };
+    enum { ARG_tx, ARG_rx, ARG_baudrate, ARG_loopback, ARG_silent, ARG_auto_restart, ARG_fd, ARG_data_baudrate, NUM_ARGS };
     static const mp_arg_t allowed_args[] = {
         { MP_QSTR_tx, MP_ARG_OBJ | MP_ARG_REQUIRED },
         { MP_QSTR_rx, MP_ARG_OBJ | MP_ARG_REQUIRED },
@@ -52,6 +56,8 @@ static mp_obj_t canio_can_make_new(const mp_obj_type_t *type, size_t n_args, siz
         { MP_QSTR_loopback, MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_silent, MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_auto_restart, MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_fd, MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_data_baudrate, MP_ARG_INT, {.u_int = 0} },
     };
     mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
     MP_STATIC_ASSERT(MP_ARRAY_SIZE(allowed_args) == NUM_ARGS);
@@ -65,7 +71,14 @@ static mp_obj_t canio_can_make_new(const mp_obj_type_t *type, size_t n_args, siz
     }
 
     canio_can_obj_t *self = mp_obj_malloc_with_finaliser(canio_can_obj_t, &canio_can_type);
+    #ifdef COMMON_HAL_CANIO_FD_SUPPORTED
+    common_hal_canio_can_construct_fd(self, tx_pin, rx_pin, args[ARG_baudrate].u_int, args[ARG_loopback].u_bool, args[ARG_silent].u_bool, args[ARG_fd].u_bool, args[ARG_data_baudrate].u_int);
+    #else
+    if (args[ARG_fd].u_bool) {
+        mp_raise_NotImplementedError(MP_ERROR_TEXT("CAN FD not supported"));
+    }
     common_hal_canio_can_construct(self, tx_pin, rx_pin, args[ARG_baudrate].u_int, args[ARG_loopback].u_bool, args[ARG_silent].u_bool);
+    #endif
 
     common_hal_canio_can_auto_restart_set(self, args[ARG_auto_restart].u_bool);
 
@@ -319,6 +332,28 @@ static mp_obj_t canio_can_exit(size_t num_args, const mp_obj_t args[]) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(canio_can_exit_obj, 4, 4, canio_can_exit);
 
+#ifdef COMMON_HAL_CANIO_FD_SUPPORTED
+//|     fd: bool
+//|     """True if CAN FD is enabled (read-only)"""
+static mp_obj_t canio_can_fd_get(mp_obj_t self_in) {
+    canio_can_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    common_hal_canio_can_check_for_deinit(self);
+    return mp_obj_new_bool(common_hal_canio_can_fd_get(self));
+}
+MP_DEFINE_CONST_FUN_OBJ_1(canio_can_fd_get_obj, canio_can_fd_get);
+MP_PROPERTY_GETTER(canio_can_fd_obj, (mp_obj_t)&canio_can_fd_get_obj);
+
+//|     data_baudrate: int
+//|     """The FD data phase baud rate (read-only)"""
+static mp_obj_t canio_can_data_baudrate_get(mp_obj_t self_in) {
+    canio_can_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    common_hal_canio_can_check_for_deinit(self);
+    return MP_OBJ_NEW_SMALL_INT(common_hal_canio_can_data_baudrate_get(self));
+}
+MP_DEFINE_CONST_FUN_OBJ_1(canio_can_data_baudrate_get_obj, canio_can_data_baudrate_get);
+MP_PROPERTY_GETTER(canio_can_data_baudrate_obj, (mp_obj_t)&canio_can_data_baudrate_get_obj);
+#endif
+
 static const mp_rom_map_elem_t canio_can_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR___enter__), MP_ROM_PTR(&canio_can_enter_obj) },
     { MP_ROM_QSTR(MP_QSTR___exit__), MP_ROM_PTR(&canio_can_exit_obj) },
@@ -334,6 +369,10 @@ static const mp_rom_map_elem_t canio_can_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_silent), MP_ROM_PTR(&canio_can_silent_obj) },
     { MP_ROM_QSTR(MP_QSTR_state), MP_ROM_PTR(&canio_can_state_obj) },
     { MP_ROM_QSTR(MP_QSTR_transmit_error_count), MP_ROM_PTR(&canio_can_transmit_error_count_obj) },
+#ifdef COMMON_HAL_CANIO_FD_SUPPORTED
+    { MP_ROM_QSTR(MP_QSTR_fd), MP_ROM_PTR(&canio_can_fd_obj) },
+    { MP_ROM_QSTR(MP_QSTR_data_baudrate), MP_ROM_PTR(&canio_can_data_baudrate_obj) },
+#endif
 };
 static MP_DEFINE_CONST_DICT(canio_can_locals_dict, canio_can_locals_dict_table);
 

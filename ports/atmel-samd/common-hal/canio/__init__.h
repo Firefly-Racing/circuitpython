@@ -6,13 +6,17 @@
 
 #pragma once
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "hal/utils/include/utils.h"
 #include "component/can.h"
 
-#define COMMON_HAL_CANIO_MAX_MESSAGE_LENGTH (8)
+#define COMMON_HAL_CANIO_MAX_MESSAGE_LENGTH (64)
 #define COMMON_HAL_CANIO_RX_FIFO_SIZE (3)
 #define COMMON_HAL_CANIO_RX_FILTER_SIZE (4)
 #define COMMON_HAL_CANIO_TX_FIFO_SIZE (1)
+#define COMMON_HAL_CANIO_FD_SUPPORTED (1)
 
 // This appears to be a typo (transposition error) in the ASF4 headers
 // It's called the "Extended ID Filter Entry"
@@ -44,3 +48,35 @@ typedef struct {
     CanMramSidfe standard_rx_filter[COMMON_HAL_CANIO_RX_FILTER_SIZE];
     CanMramXifde extended_rx_filter[COMMON_HAL_CANIO_RX_FILTER_SIZE];
 } canio_can_state_t;
+
+// CAN FD DLC <-> byte length
+static inline uint8_t canio_dlc_to_len(uint8_t dlc) {
+    static const uint8_t lens[16] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64};
+    return lens[dlc & 0xf];
+}
+
+// Smallest DLC whose length is >= len
+static inline uint8_t canio_len_to_dlc(size_t len) {
+    if (len <= 8) {
+        return (uint8_t)len;
+    }
+    if (len <= 12) {
+        return 9;
+    }
+    if (len <= 16) {
+        return 10;
+    }
+    if (len <= 20) {
+        return 11;
+    }
+    if (len <= 24) {
+        return 12;
+    }
+    if (len <= 32) {
+        return 13;
+    }
+    if (len <= 48) {
+        return 14;
+    }
+    return 15;
+}

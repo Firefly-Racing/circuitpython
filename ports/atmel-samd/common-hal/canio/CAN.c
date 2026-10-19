@@ -27,7 +27,7 @@ static canio_can_obj_t *can_objs[MP_ARRAY_SIZE(can_insts)];
 // This must be placed in the first 64kB of RAM
 static COMPILER_SECTION(".canram") canio_can_state_t can_state[MP_ARRAY_SIZE(can_insts)];
 
-void common_hal_canio_can_construct(canio_can_obj_t *self, const mcu_pin_obj_t *tx, const mcu_pin_obj_t *rx, int baudrate, bool loopback, bool silent) {
+void common_hal_canio_can_construct_fd(canio_can_obj_t *self, const mcu_pin_obj_t *tx, const mcu_pin_obj_t *rx, int baudrate, bool loopback, bool silent, bool fd, int data_baudrate) {
     mcu_pin_function_t *tx_function = mcu_find_pin_function(can_tx, tx, -1, MP_QSTR_tx);
     int instance = tx_function->instance;
 
@@ -38,12 +38,40 @@ void common_hal_canio_can_construct(canio_can_obj_t *self, const mcu_pin_obj_t *
 #define DIV_ROUND(a, b) (((a) + (b) / 2) / (b))
 #define DIV_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
 
-    uint32_t clocks_per_bit = DIV_ROUND(can_frequency, baudrate);
+    if (baudrate <= 0) {
+        mp_raise_OSError(MP_EINVAL);
+    }
+    if (!fd || data_baudrate <= 0) {
+        data_baudrate = baudrate;
+    }
+    if (data_baudrate < baudrate) {
+        mp_raise_OSError(MP_EINVAL);
+    }
+
+    // Nominal bit timing
+    uint32_t clocks_per_bit = DIV_ROUND(can_frequency, (uint32_t)baudrate);
     uint32_t clocks_to_sample = DIV_ROUND(clocks_per_bit * 7, 8);
     uint32_t clocks_after_sample = clocks_per_bit - clocks_to_sample;
     uint32_t divisor = MAX(DIV_ROUND_UP(clocks_to_sample, 256), DIV_ROUND_UP(clocks_after_sample, 128));
-    if (divisor > 32) {
+    if (divisor == 0 || divisor > 32) {
         mp_raise_OSError(MP_EINVAL); // baudrate cannot be attained (16kHz or something is lower bound, should never happen)
+    }
+
+    // Data bit timing (DTSEG1+1 <= 32 tq, DTSEG2+1 <= 16 tq, DBRP+1 <= 32)
+    uint32_t d_clocks_per_bit = DIV_ROUND(can_frequency, (uint32_t)data_baudrate);
+    if (d_clocks_per_bit < 4) {
+        mp_raise_OSError(MP_EINVAL);
+    }
+    uint32_t d_clocks_to_sample = DIV_ROUND(d_clocks_per_bit * 7, 8);
+    uint32_t d_clocks_after_sample = d_clocks_per_bit - d_clocks_to_sample;
+    uint32_t d_divisor = MAX(DIV_ROUND_UP(d_clocks_to_sample, 33), DIV_ROUND_UP(d_clocks_after_sample, 16));
+    if (d_divisor == 0 || d_divisor > 32) {
+        mp_raise_OSError(MP_EINVAL);
+    }
+    uint32_t d_tq_to_sample = DIV_ROUND(d_clocks_to_sample, d_divisor); // includes 1 sync tq
+    uint32_t d_tq_after_sample = DIV_ROUND(d_clocks_after_sample, d_divisor);
+    if (d_tq_to_sample < 2 || d_tq_after_sample < 1) {
+        mp_raise_OSError(MP_EINVAL);
     }
 
     gpio_set_pin_direction(tx_function->pin, GPIO_DIRECTION_OUT);
@@ -59,6 +87,9 @@ void common_hal_canio_can_construct(canio_can_obj_t *self, const mcu_pin_obj_t *
     self->hw = can_insts[instance];
     self->state = &can_state[instance];
 
+    self->baudrate = baudrate;
+    self->data_baudrate = data_baudrate;
+    self->fd = fd;
     self->loopback = loopback;
     self->silent = silent;
 
@@ -88,8 +119,9 @@ void common_hal_canio_can_construct(canio_can_obj_t *self, const mcu_pin_obj_t *
     #endif
     }
 
-    self->hw->CCCR.bit.FDOE = 0; // neither FD nor Bit Rate Switch enabled
-    self->hw->CCCR.bit.BRSE = 0;
+    // CAN FD operation, and bit rate switching only if the data rate differs
+    self->hw->CCCR.bit.FDOE = fd;
+    self->hw->CCCR.bit.BRSE = (fd && data_baudrate != baudrate);
 
     hri_can_write_MRCFG_reg(self->hw, CAN_MRCFG_QOS(CAN_MRCFG_QOS_DISABLE_Val)); // QoS disabled (no sensitive operation)
 
@@ -106,17 +138,24 @@ void common_hal_canio_can_construct(canio_can_obj_t *self, const mcu_pin_obj_t *
         hri_can_write_NBTP_reg(self->hw, btp.reg);
     }
 
-    // A "data bit" is a data bit :) with dula rate CAN FD, this is a higher
-    // rate.  However, CAN FD is not implemented in CircuitPython, and this is
-    // the same rate as the "nominal rate".
+    // A "data bit" is a data bit :) with dual rate CAN FD, this is a higher rate.
     {
+        bool tdc = fd && data_baudrate > 1000000; // transmitter delay compensation needed above 1 Mbit/s
         CAN_DBTP_Type btp = {
-            .bit.DTSEG1 = DIV_ROUND(clocks_to_sample, divisor) - 1,
-            .bit.DTSEG2 = DIV_ROUND(clocks_after_sample, divisor) - 1,
-            .bit.DBRP = divisor - 1,
-            .bit.DSJW = DIV_ROUND(clocks_after_sample, divisor * 4),
+            .bit.DTSEG1 = d_tq_to_sample - 2,
+            .bit.DTSEG2 = d_tq_after_sample - 1,
+            .bit.DBRP = d_divisor - 1,
+            .bit.DSJW = DIV_ROUND(d_clocks_after_sample, d_divisor * 4),
+            .bit.TDC = tdc,
         };
         hri_can_write_DBTP_reg(self->hw, btp.reg);
+
+        // Secondary sample point offset, in CAN clock periods
+        CAN_TDCR_Type tdcr = {
+            .bit.TDCF = 0,
+            .bit.TDCO = MIN(d_tq_to_sample * d_divisor, 127),
+        };
+        hri_can_write_TDCR_reg(self->hw, tdcr.reg);
     }
 
     {
@@ -135,20 +174,20 @@ void common_hal_canio_can_construct(canio_can_obj_t *self, const mcu_pin_obj_t *
         hri_can_write_RXF1C_reg(self->hw, rxf.reg);
     }
 
-    // All RX data has an 8 byte payload (max)
+    // All RX data has a 64 byte payload (max)
     {
         CAN_RXESC_Type esc = {
-            .bit.F0DS = CAN_RXESC_F0DS_DATA8_Val,
-            .bit.F1DS = CAN_RXESC_F1DS_DATA8_Val,
-            .bit.RBDS = CAN_RXESC_RBDS_DATA8_Val,
+            .bit.F0DS = CAN_RXESC_F0DS_DATA64_Val,
+            .bit.F1DS = CAN_RXESC_F1DS_DATA64_Val,
+            .bit.RBDS = CAN_RXESC_RBDS_DATA64_Val,
         };
         hri_can_write_RXESC_reg(self->hw, esc.reg);
     }
 
-    // All TX data has an 8 byte payload (max)
+    // All TX data has a 64 byte payload (max)
     {
         CAN_TXESC_Type esc = {
-            .bit.TBDS = CAN_TXESC_TBDS_DATA8_Val,
+            .bit.TBDS = CAN_TXESC_TBDS_DATA64_Val,
         };
         hri_can_write_TXESC_reg(self->hw, esc.reg);
     }
@@ -234,8 +273,20 @@ void common_hal_canio_can_construct(canio_can_obj_t *self, const mcu_pin_obj_t *
     can_objs[instance] = self;
 }
 
+void common_hal_canio_can_construct(canio_can_obj_t *self, const mcu_pin_obj_t *tx, const mcu_pin_obj_t *rx, int baudrate, bool loopback, bool silent) {
+    common_hal_canio_can_construct_fd(self, tx, rx, baudrate, loopback, silent, false, 0);
+}
+
+bool common_hal_canio_can_fd_get(canio_can_obj_t *self) {
+    return self->fd;
+}
+
 bool common_hal_canio_can_loopback_get(canio_can_obj_t *self) {
     return self->loopback;
+}
+
+int common_hal_canio_can_data_baudrate_get(canio_can_obj_t *self) {
+    return self->data_baudrate;
 }
 
 int common_hal_canio_can_baudrate_get(canio_can_obj_t *self) {
@@ -289,14 +340,19 @@ static void maybe_auto_restart(canio_can_obj_t *self) {
 }
 
 void common_hal_canio_can_send(canio_can_obj_t *self, mp_obj_t message_in) {
+    canio_message_obj_t *message = message_in;
+
+    bool rtr = message->base.type == &canio_remote_transmission_request_type;
+    bool fd = !rtr && (message->fd || message->size > 8);
+    if (fd && !self->fd) {
+        mp_raise_ValueError(MP_ERROR_TEXT("CAN FD not enabled"));
+    }
+
     maybe_auto_restart(self);
 
-    canio_message_obj_t *message = message_in;
-    ;
     // We have just one dedicated TX buffer, use it!
     canio_can_tx_buffer_t *ent = &self->state->tx_buffer[0];
 
-    bool rtr = message->base.type == &canio_remote_transmission_request_type;
     ent->txb0.bit.ESI = false;
     ent->txb0.bit.XTD = message->extended;
     ent->txb0.bit.RTR = rtr;
@@ -306,14 +362,20 @@ void common_hal_canio_can_send(canio_can_obj_t *self, mp_obj_t message_in) {
         ent->txb0.bit.ID = message->id << 18; // short addresses are left-justified
     }
 
+    uint8_t dlc = fd ? canio_len_to_dlc(message->size) : message->size;
+
     ent->txb1.bit.MM = 0; // "message marker"
     ent->txb1.bit.EFC = 0; // don't store fifo events to event queue
-    ent->txb1.bit.FDF = 0; // Classic CAN format
-    ent->txb1.bit.BRS = 0; // No bit rate switching
-    ent->txb1.bit.DLC = message->size;
+    ent->txb1.bit.FDF = fd;
+    ent->txb1.bit.BRS = fd && message->brs;
+    ent->txb1.bit.DLC = dlc;
 
     if (!rtr) {
         memcpy(ent->data, message->data, message->size);
+        if (fd) {
+            // zero-pad up to the next valid FD length
+            memset(ent->data + message->size, 0, canio_dlc_to_len(dlc) - message->size);
+        }
     }
 
     // TX buffer add request

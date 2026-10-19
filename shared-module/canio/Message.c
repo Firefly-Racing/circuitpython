@@ -13,6 +13,8 @@ void common_hal_canio_message_construct(canio_message_obj_t *self, int id, void 
     self->id = id;
     self->size = size;
     self->extended = extended;
+    self->fd = false;
+    self->brs = false;
     if (data) {
         memcpy(self->data, data, size);
     }
@@ -31,7 +33,7 @@ const void *common_hal_canio_message_get_data(const canio_message_obj_t *self) {
     return self->data;
 }
 
-const void common_hal_canio_message_set_data(canio_message_obj_t *self, const void *data, size_t size) {
+void common_hal_canio_message_set_data(canio_message_obj_t *self, const void *data, size_t size) {
     self->size = size;
     memcpy(self->data, data, size);
 }
@@ -47,4 +49,20 @@ bool common_hal_canio_message_get_extended(const canio_message_obj_t *self) {
 
 void common_hal_canio_message_set_extended(canio_message_obj_t *self, bool extended) {
     self->extended = extended;
+}
+
+bool common_hal_canio_message_get_fd(const canio_message_obj_t *self) {
+    return self->fd;
+}
+
+void common_hal_canio_message_set_fd(canio_message_obj_t *self, bool fd) {
+    self->fd = fd;
+}
+
+bool common_hal_canio_message_get_brs(const canio_message_obj_t *self) {
+    return self->brs;
+}
+
+void common_hal_canio_message_set_brs(canio_message_obj_t *self, bool brs) {
+    self->brs = brs;
 }
