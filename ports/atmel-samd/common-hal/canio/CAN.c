@@ -27,6 +27,59 @@ static canio_can_obj_t *can_objs[MP_ARRAY_SIZE(can_insts)];
 // This must be placed in the first 64kB of RAM
 static COMPILER_SECTION(".canram") canio_can_state_t can_state[MP_ARRAY_SIZE(can_insts)];
 
+typedef struct {
+    uint32_t div;             // prescaler, 1..max_div
+    uint32_t tq_to_sample;    // time quanta from bit start to sample point (includes 1 sync tq)
+    uint32_t tq_after_sample; // time quanta after sample point
+} can_bit_timing_t;
+
+// Finds the prescaler / time quanta count with the smallest rate error.
+// Returns false if the rate cannot be achieved within 0.5%.
+static bool compute_bit_timing(uint32_t freq, uint32_t baud, uint32_t max_div,
+    uint32_t min_tq, uint32_t max_tq, uint32_t max_seg1_tq, uint32_t max_seg2_tq,
+    uint32_t sample_num, uint32_t sample_den, can_bit_timing_t *out) {
+    uint64_t best_err = UINT64_MAX;
+    uint32_t best_div = 0;
+    uint32_t best_tq = 0;
+    for (uint32_t div = 1; div <= max_div; div++) {
+        uint64_t per_tq = (uint64_t)baud * div;
+        uint32_t tq = (uint32_t)(((uint64_t)freq + per_tq / 2) / per_tq);
+        if (tq < min_tq) {
+            break;
+        }
+        if (tq > max_tq) {
+            tq = max_tq;
+        }
+        uint64_t actual = per_tq * tq;
+        uint64_t err = actual > freq ? actual - freq : freq - actual;
+        if (err < best_err) {
+            best_err = err;
+            best_div = div;
+            best_tq = tq;
+        }
+    }
+    if (best_div == 0 || best_err * 1000000ULL > (uint64_t)freq * 5000ULL) {
+        return false;
+    }
+    uint32_t to = (best_tq * sample_num + sample_den / 2) / sample_den;
+    if (to > max_seg1_tq) {
+        to = max_seg1_tq;
+    }
+    if (best_tq - to > max_seg2_tq) {
+        to = best_tq - max_seg2_tq;
+    }
+    if (best_tq - to < 1) {
+        to = best_tq - 1;
+    }
+    if (to < 2) {
+        to = 2;
+    }
+    out->div = best_div;
+    out->tq_to_sample = to;
+    out->tq_after_sample = best_tq - to;
+    return true;
+}
+
 void common_hal_canio_can_construct_fd(canio_can_obj_t *self, const mcu_pin_obj_t *tx, const mcu_pin_obj_t *rx, int baudrate, bool loopback, bool silent, bool fd, int data_baudrate) {
     mcu_pin_function_t *tx_function = mcu_find_pin_function(can_tx, tx, -1, MP_QSTR_tx);
     int instance = tx_function->instance;
@@ -34,9 +87,6 @@ void common_hal_canio_can_construct_fd(canio_can_obj_t *self, const mcu_pin_obj_
     mcu_pin_function_t *rx_function = mcu_find_pin_function(can_rx, rx, instance, MP_QSTR_rx);
 
     const uint32_t can_frequency = CONF_CAN0_FREQUENCY;
-
-#define DIV_ROUND(a, b) (((a) + (b) / 2) / (b))
-#define DIV_ROUND_UP(a, b) (((a) + (b) - 1) / (b))
 
     if (baudrate <= 0) {
         mp_raise_OSError(MP_EINVAL);
@@ -48,30 +98,16 @@ void common_hal_canio_can_construct_fd(canio_can_obj_t *self, const mcu_pin_obj_
         mp_raise_OSError(MP_EINVAL);
     }
 
-    // Nominal bit timing
-    uint32_t clocks_per_bit = DIV_ROUND(can_frequency, (uint32_t)baudrate);
-    uint32_t clocks_to_sample = DIV_ROUND(clocks_per_bit * 7, 8);
-    uint32_t clocks_after_sample = clocks_per_bit - clocks_to_sample;
-    uint32_t divisor = MAX(DIV_ROUND_UP(clocks_to_sample, 256), DIV_ROUND_UP(clocks_after_sample, 128));
-    if (divisor == 0 || divisor > 32) {
-        mp_raise_OSError(MP_EINVAL); // baudrate cannot be attained (16kHz or something is lower bound, should never happen)
+    // Nominal: NBRP+1 <= 512, NTSEG1+2 <= 257 tq (incl. sync), NTSEG2+1 <= 128 tq, 4..385 tq per bit
+    can_bit_timing_t nom;
+    if (!compute_bit_timing(can_frequency, (uint32_t)baudrate, 512, 4, 385, 257, 128, 7, 8, &nom)) {
+        mp_raise_OSError(MP_EINVAL); // baudrate cannot be attained
     }
 
-    // Data bit timing (DTSEG1+1 <= 32 tq, DTSEG2+1 <= 16 tq, DBRP+1 <= 32)
-    uint32_t d_clocks_per_bit = DIV_ROUND(can_frequency, (uint32_t)data_baudrate);
-    if (d_clocks_per_bit < 4) {
-        mp_raise_OSError(MP_EINVAL);
-    }
-    uint32_t d_clocks_to_sample = DIV_ROUND(d_clocks_per_bit * 7, 8);
-    uint32_t d_clocks_after_sample = d_clocks_per_bit - d_clocks_to_sample;
-    uint32_t d_divisor = MAX(DIV_ROUND_UP(d_clocks_to_sample, 33), DIV_ROUND_UP(d_clocks_after_sample, 16));
-    if (d_divisor == 0 || d_divisor > 32) {
-        mp_raise_OSError(MP_EINVAL);
-    }
-    uint32_t d_tq_to_sample = DIV_ROUND(d_clocks_to_sample, d_divisor); // includes 1 sync tq
-    uint32_t d_tq_after_sample = DIV_ROUND(d_clocks_after_sample, d_divisor);
-    if (d_tq_to_sample < 2 || d_tq_after_sample < 1) {
-        mp_raise_OSError(MP_EINVAL);
+    // Data: DBRP+1 <= 32, DTSEG1+2 <= 33 tq (incl. sync), DTSEG2+1 <= 16 tq, 4..49 tq per bit
+    can_bit_timing_t dat;
+    if (!compute_bit_timing(can_frequency, (uint32_t)data_baudrate, 32, 4, 49, 33, 16, 3, 4, &dat)) {
+        mp_raise_OSError(MP_EINVAL); // data baudrate cannot be attained
     }
 
     gpio_set_pin_direction(tx_function->pin, GPIO_DIRECTION_OUT);
@@ -119,7 +155,7 @@ void common_hal_canio_can_construct_fd(canio_can_obj_t *self, const mcu_pin_obj_
     #endif
     }
 
-    // CAN FD operation, and bit rate switching only if the data rate differs
+    // CAN FD operation; bit rate switching only if the data rate differs
     self->hw->CCCR.bit.FDOE = fd;
     self->hw->CCCR.bit.BRSE = (fd && data_baudrate != baudrate);
 
@@ -128,12 +164,11 @@ void common_hal_canio_can_construct_fd(canio_can_obj_t *self, const mcu_pin_obj_
     // A "nominal bit" is a header bit.  With dual rate CAN FD, this is a slower rate
     {
         CAN_NBTP_Type btp = {
-            // 0 means "1 tq", but 2 is subtracted from NTSEG1 for the
-            // fixed 1 "SYNC" tq
-            .bit.NTSEG1 = DIV_ROUND(clocks_to_sample, divisor) - 2,
-            .bit.NTSEG2 = DIV_ROUND(clocks_after_sample, divisor) - 1,
-            .bit.NBRP = divisor - 1,
-            .bit.NSJW = DIV_ROUND(clocks_after_sample, divisor * 4),
+            // field + 1 = tq; NTSEG1 excludes the fixed 1 "SYNC" tq
+            .bit.NTSEG1 = nom.tq_to_sample - 2,
+            .bit.NTSEG2 = nom.tq_after_sample - 1,
+            .bit.NBRP = nom.div - 1,
+            .bit.NSJW = nom.tq_after_sample - 1,
         };
         hri_can_write_NBTP_reg(self->hw, btp.reg);
     }
@@ -142,18 +177,18 @@ void common_hal_canio_can_construct_fd(canio_can_obj_t *self, const mcu_pin_obj_
     {
         bool tdc = fd && data_baudrate > 1000000; // transmitter delay compensation needed above 1 Mbit/s
         CAN_DBTP_Type btp = {
-            .bit.DTSEG1 = d_tq_to_sample - 2,
-            .bit.DTSEG2 = d_tq_after_sample - 1,
-            .bit.DBRP = d_divisor - 1,
-            .bit.DSJW = DIV_ROUND(d_clocks_after_sample, d_divisor * 4),
+            .bit.DTSEG1 = dat.tq_to_sample - 2,
+            .bit.DTSEG2 = dat.tq_after_sample - 1,
+            .bit.DBRP = dat.div - 1,
+            .bit.DSJW = dat.tq_after_sample - 1,
             .bit.TDC = tdc,
         };
         hri_can_write_DBTP_reg(self->hw, btp.reg);
 
-        // Secondary sample point offset, in CAN clock periods
+        // Secondary sample point offset, in CAN clock periods (0..127)
         CAN_TDCR_Type tdcr = {
             .bit.TDCF = 0,
-            .bit.TDCO = MIN(d_tq_to_sample * d_divisor, 127),
+            .bit.TDCO = MIN(dat.tq_to_sample * dat.div, 127),
         };
         hri_can_write_TDCR_reg(self->hw, tdcr.reg);
     }
