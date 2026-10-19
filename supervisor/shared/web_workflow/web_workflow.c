@@ -9,7 +9,6 @@
 
 #include <stdarg.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "extmod/vfs.h"
@@ -90,7 +89,6 @@ typedef struct {
     bool json;
     bool websocket;
     bool new_socket;
-    uint32_t websocket_version;
     // RFC6455 for websockets says this header should be 24 base64 characters long.
     char websocket_key[24 + 1];
 } _request;
@@ -1272,6 +1270,17 @@ static void _decode_percents(char *str) {
     }
 }
 
+// Parse leading decimal digits. Overflow is not checked.
+// Used instead of strtoul() and strtoull(), which would pull in libc code.
+static uint64_t _parse_decimal(const char *str) {
+    uint64_t value = 0;
+    while ('0' <= *str && *str <= '9') {
+        value = value * 10 + (*str - '0');
+        str++;
+    }
+    return value;
+}
+
 static bool _reply(socketpool_socket_obj_t *socket, _request *request) {
     if (request->redirect) {
         #if CIRCUITPY_MDNS
@@ -1607,7 +1616,7 @@ static void _process_request(socketpool_socket_obj_t *socket, _request *request)
                         strncpy(request->host, request->header_value, sizeof(request->host) - 1);
                         request->host[sizeof(request->host) - 1] = '\0';
                     } else if (strcasecmp(request->header_key, "Content-Length") == 0) {
-                        request->content_length = strtoul(request->header_value, NULL, 10);
+                        request->content_length = _parse_decimal(request->header_value);
                     } else if (strcasecmp(request->header_key, "Expect") == 0) {
                         request->expect = strcmp(request->header_value, "100-continue") == 0;
                     } else if (strcasecmp(request->header_key, "Accept") == 0) {
@@ -1616,11 +1625,9 @@ static void _process_request(socketpool_socket_obj_t *socket, _request *request)
                         strncpy(request->origin, request->header_value, sizeof(request->origin) - 1);
                         request->origin[sizeof(request->origin) - 1] = '\0';
                     } else if (strcasecmp(request->header_key, "X-Timestamp") == 0) {
-                        request->timestamp_ms = strtoull(request->header_value, NULL, 10);
+                        request->timestamp_ms = _parse_decimal(request->header_value);
                     } else if (strcasecmp(request->header_key, "Upgrade") == 0) {
                         request->websocket = strcmp(request->header_value, "websocket") == 0;
-                    } else if (strcasecmp(request->header_key, "Sec-WebSocket-Version") == 0) {
-                        request->websocket_version = strtoul(request->header_value, NULL, 10);
                     } else if (strcasecmp(request->header_key, "Sec-WebSocket-Key") == 0 &&
                                strlen(request->header_value) == 24) {
                         strcpy(request->websocket_key, request->header_value);

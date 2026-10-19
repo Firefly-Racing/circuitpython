@@ -70,7 +70,7 @@ static void serial_cb(const struct device *dev, void *user_data) {
         if (uart_fifo_read(dev, &c, 1) != 1) {
             break;
         }
-        if (mp_interrupt_char == c) {
+        if (self->sigint_enabled && mp_interrupt_char == c) {
             common_hal_busio_uart_clear_rx_buffer(self);
             mp_sched_keyboard_interrupt();
             port_wake_main_task_from_isr();
@@ -83,7 +83,7 @@ static void serial_cb(const struct device *dev, void *user_data) {
 }
 
 // Helper function for Zephyr-specific initialization from device tree
-mp_obj_t common_hal_busio_uart_construct_from_device(busio_uart_obj_t *self, const struct device *uart_device, uint16_t receiver_buffer_size, byte *receiver_buffer) {
+mp_obj_t common_hal_busio_uart_construct_from_device(busio_uart_obj_t *self, const struct device *uart_device, uint16_t receiver_buffer_size, byte *receiver_buffer, bool sigint_enabled) {
     self->base.type = &busio_uart_type;
     self->uart_device = uart_device;
     self->dynamic = false;
@@ -104,6 +104,7 @@ mp_obj_t common_hal_busio_uart_construct_from_device(busio_uart_obj_t *self, con
     self->write_timeout = K_FOREVER;
     self->rx_paused = false;
     self->flow_control = false;
+    self->sigint_enabled = sigint_enabled;
     uart_irq_rx_enable(uart_device);
 
     return MP_OBJ_FROM_PTR(self);
@@ -148,7 +149,7 @@ void common_hal_busio_uart_construct(busio_uart_obj_t *self,
         allocated_buffer = true;
     }
 
-    common_hal_busio_uart_construct_from_device(self, dev, receiver_buffer_size, receiver_buffer);
+    common_hal_busio_uart_construct_from_device(self, dev, receiver_buffer_size, receiver_buffer, sigint_enabled);
     self->dynamic = true;
     self->receiver_buffer = allocated_buffer ? receiver_buffer : NULL;
     self->tx = tx;
@@ -254,20 +255,28 @@ void common_hal_busio_uart_set_baudrate(busio_uart_obj_t *self, uint32_t baudrat
     uart_configure(self->uart_device, &config);
 }
 
+// K_FOREVER reads as -1, which usb_cdc reports as None.
+static mp_float_t timeout_to_seconds(k_timeout_t timeout) {
+    if (K_TIMEOUT_EQ(timeout, K_FOREVER)) {
+        return -1;
+    }
+    return (mp_float_t)k_ticks_to_us_floor64(timeout.ticks) / MICROPY_FLOAT_CONST(1000000.0);
+}
+
 mp_float_t common_hal_busio_uart_get_timeout(busio_uart_obj_t *self) {
-    return (mp_float_t)self->timeout.ticks / 1000000.0;
+    return timeout_to_seconds(self->timeout);
 }
 
 void common_hal_busio_uart_set_timeout(busio_uart_obj_t *self, mp_float_t timeout) {
-    self->timeout = K_USEC((uint64_t)(timeout * 1000000));
+    self->timeout = timeout < 0 ? K_FOREVER : K_USEC((uint64_t)(timeout * 1000000));
 }
 
 mp_float_t common_hal_busio_uart_get_write_timeout(busio_uart_obj_t *self) {
-    return (mp_float_t)self->write_timeout.ticks / 1000000.0;
+    return timeout_to_seconds(self->write_timeout);
 }
 
 void common_hal_busio_uart_set_write_timeout(busio_uart_obj_t *self, mp_float_t write_timeout) {
-    self->write_timeout = K_USEC((uint64_t)(write_timeout * 1000000));
+    self->write_timeout = write_timeout < 0 ? K_FOREVER : K_USEC((uint64_t)(write_timeout * 1000000));
 }
 
 uint32_t common_hal_busio_uart_rx_characters_available(busio_uart_obj_t *self) {

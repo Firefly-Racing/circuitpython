@@ -199,7 +199,8 @@ int _zephyr_disk_ioctl(struct disk_info *disk, uint8_t cmd, void *buff) {
             disk_ioctl(root, GET_SECTOR_SIZE, buff);
             return 0;
         case DISK_IOCTL_CTRL_SYNC:
-            disk_ioctl(root, CTRL_SYNC, buff);
+            // Zephyr's MSC class sends this after every WRITE10. Don't flush
+            // here; the background flush writes the cached page.
             autoreload_resume(AUTORELOAD_SUSPEND_USB);
 
             // This write is complete; initiate an autoreload if this was a file data or metadata write,
@@ -314,7 +315,7 @@ void usb_init(void) {
     if (console) {
         uint8_t *receiver_buffer = port_malloc(1024, true);
         if (receiver_buffer != NULL) {
-            common_hal_usb_cdc_serial_construct_from_device(&usb_cdc_console_obj, DEVICE_DT_GET(DT_NODELABEL(cdc_acm_console)), 1024, receiver_buffer);
+            common_hal_usb_cdc_serial_construct_from_device(&usb_cdc_console_obj, DEVICE_DT_GET(DT_NODELABEL(cdc_acm_console)), 1024, receiver_buffer, true);
         } else {
             console = false;
         }
@@ -325,7 +326,7 @@ void usb_init(void) {
     if (data) {
         uint8_t *receiver_buffer = port_malloc(1024, true);
         if (receiver_buffer != NULL) {
-            common_hal_usb_cdc_serial_construct_from_device(&usb_cdc_data_obj, DEVICE_DT_GET(DT_NODELABEL(cdc_acm_data)), 1024, receiver_buffer);
+            common_hal_usb_cdc_serial_construct_from_device(&usb_cdc_data_obj, DEVICE_DT_GET(DT_NODELABEL(cdc_acm_data)), 1024, receiver_buffer, false);
         } else {
             data = false;
         }

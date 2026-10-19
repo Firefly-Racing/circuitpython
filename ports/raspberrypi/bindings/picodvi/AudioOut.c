@@ -16,17 +16,24 @@
 //| class AudioOut:
 //|     """Plays audio through the DVI cable of a `Framebuffer`, on displays
 //|     that have speakers or an audio output. RP2350 only: elsewhere the
-//|     constructor raises `NotImplementedError`."""
+//|     constructor raises `NotImplementedError`.
+//|
+//|     On boards with a default DVI display, ``supervisor.runtime.audio`` is an AudioOut
+//|     for the display configured at startup. It is ``None`` if that display
+//|     was not configured, its mode has no room for audio, or it was released.
+//|     Set ``CIRCUITPY_PICODVI_AUDIO = false`` in ``settings.toml`` to turn it
+//|     off."""
 //|
 //|     def __init__(self, framebuffer: Framebuffer) -> None:
 //|         """Create an AudioOut that sends audio with ``framebuffer``'s video.
 //|
 //|         The framebuffer must use a 640-pixel-wide output mode, such as
-//|         640x480 or 320x240. This reserves about 120 KB (640 wide) or
-//|         150 KB (320 or 160 wide) of internal RAM until `deinit`, so create
-//|         the AudioOut soon after the Framebuffer. A 640x480 framebuffer with
-//|         8-bit color leaves too little RAM. The display receives silence
-//|         whenever nothing is playing.
+//|         640x480 or 320x240. This reserves about 37 KB (640 wide) or
+//|         50 KB (320 or 160 wide) of internal RAM until `deinit`, so create
+//|         the AudioOut soon after the Framebuffer. With 640x480 and 8-bit
+//|         color, usually only the display configured at startup has room
+//|         for audio. The display receives silence whenever nothing is
+//|         playing.
 //|
 //|         :param Framebuffer framebuffer: The display output to add audio to
 //|

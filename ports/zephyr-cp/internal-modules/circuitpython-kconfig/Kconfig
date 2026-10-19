@@ -64,6 +64,42 @@ config ZERO_LATENCY_IRQS
 config BT_CTLR_ASSERT_OVERHEAD_START
 	default n if SOC_FAMILY_NORDIC_NRF
 
+# ===== Flash filesystem scratch page =====
+# supervisor/flash.c caches the erase page being written in RAM. With a
+# scratch page, it allocates the cache only while writing, and stages writes
+# in the last erase page of the filesystem when it can't. Without one, it
+# allocates the cache once at startup and keeps it, and the filesystem gets
+# the whole partition.
+#
+# ports/raspberrypi caches one 4 KB sector in a static buffer and reserves no
+# scratch page, so do the same on RP2040 and RP2350: the filesystem sizes
+# then match, and either port can use a filesystem formatted by the other.
+config CIRCUITPY_FLASH_SCRATCH_PAGE
+	bool "Stage flash writes in a scratch page when the RAM cache can't be allocated"
+	default n if SOC_FAMILY_RPI_PICO
+	default y
+
+# ===== External NOR flash =====
+# supervisor/flash.c sets aside the last erase page of the filesystem as a
+# scratch page, and caches a whole erase page in RAM while writing. The NOR
+# flash drivers' default layout page is the 64 KB erase block, which loses
+# 64 KB of the filesystem and needs a 64 KB RAM cache. Use the 4 KB sector
+# instead; the drivers erase 4 KB sectors too. Changing one block then
+# rewrites 4 KB instead of 64 KB, which is faster for small writes such as
+# FAT updates. Filesystem partitions also start and end on 4 KB boundaries,
+# but not always on 64 KB ones.
+#
+# On nRF QSPI boards, the filesystem size then matches ports/nordic, so
+# either port can use a filesystem formatted by the other.
+config NORDIC_QSPI_NOR_FLASH_LAYOUT_PAGE_SIZE
+	default 4096 if NORDIC_QSPI_NOR
+
+config SPI_NOR_FLASH_LAYOUT_PAGE_SIZE
+	default 4096 if SPI_NOR
+
+config FLASH_MSPI_NOR_LAYOUT_PAGE_SIZE
+	default 4096 if FLASH_MSPI_NOR
+
 # ===== Bluetooth defaults =====
 
 # Use a variable for the chosen name so the comma isn't parsed as an argument separator
