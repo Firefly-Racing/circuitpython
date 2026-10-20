@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: 2026 Mikey Sklar for Adafruit Industries
 # SPDX-License-Identifier: MIT
 
-"""busio.UART on native_sim, through the console UART."""
+"""busio.UART on native_sim, through board.UART() on the second PTY UART."""
 
 import pytest
 
 TIMEOUT_CODE = """\
 import board
 
-uart = board.UART0()
+uart = board.UART()
 for t in (0.5, 2, 0):
     uart.timeout = t
     print("timeout", uart.timeout)

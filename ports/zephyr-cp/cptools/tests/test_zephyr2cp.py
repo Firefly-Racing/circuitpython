@@ -1,6 +1,7 @@
 import sys
 import pathlib
 import tempfile
+from types import SimpleNamespace
 
 # Add devicetree library to path
 portdir = pathlib.Path(__file__).parent.parent.parent
@@ -23,7 +24,10 @@ from zephyr2cp import (
     BLOCKED_FLASH_COMPAT,
     MINIMUM_RAM_SIZE,
     add_toml_pin_names,
+    _fastest_first,
+    _standard_bus_pins,
     _toml_status_pin,
+    _used_by_zephyr,
 )
 
 
@@ -796,3 +800,132 @@ class TestTomlStatusPin:
     def test_unknown_name_raises(self):
         with pytest.raises(RuntimeError, match="STATUS_NEOPIXEL = 'NOPE' is not a board pin name"):
             _toml_status_pin({"STATUS_NEOPIXEL": "NOPE"}, self.BOARD_NAMES, "STATUS_NEOPIXEL")
+
+
+class TestStandardBusPins:
+    """The standard pins of board.I2C(), board.SPI() and board.UART()."""
+
+    BOARD_NAMES = {
+        ("gpio0", 11): ["SCL"],
+        ("gpio0", 12): ["SDA"],
+        ("gpio0", 14): ["SCK"],
+        ("gpio0", 13): ["MOSI"],
+        ("gpio0", 15): ["MISO"],
+        ("gpio0", 25): ["TX"],
+        ("gpio0", 24): ["RX"],
+    }
+
+    def test_all_standard_names(self):
+        assert _standard_bus_pins(self.BOARD_NAMES) == {
+            "i2c": {"scl": ("gpio0", 11), "sda": ("gpio0", 12)},
+            "spi": {"clock": ("gpio0", 14), "mosi": ("gpio0", 13), "miso": ("gpio0", 15)},
+            "uart": {"tx": ("gpio0", 25), "rx": ("gpio0", 24)},
+        }
+
+    def test_missing_name_leaves_out_bus(self):
+        names = {key: value for key, value in self.BOARD_NAMES.items() if value != ["MISO"]}
+        assert list(_standard_bus_pins(names)) == ["i2c", "uart"]
+
+    def test_no_standard_names(self):
+        assert _standard_bus_pins({("gpio0", 2): ["D2"]}) == {}
+
+    def test_pin_names_ignore_case(self):
+        names = dict(self.BOARD_NAMES)
+        names[("gpio0", 11)] = ["scl"]
+        assert _standard_bus_pins(names)["i2c"]["scl"] == ("gpio0", 11)
+
+    def test_connector_aliases(self):
+        # Arduino header pins carry both their header name and the standard name.
+        names = {
+            ("gpio1", 0): ["D0", "RX"],
+            ("gpio1", 1): ["D1", "TX"],
+            ("gpio1", 2): ["D14", "SDA"],
+            ("gpio1", 3): ["D15", "SCL"],
+        }
+        assert _standard_bus_pins(names) == {
+            "i2c": {"scl": ("gpio1", 3), "sda": ("gpio1", 2)},
+            "uart": {"tx": ("gpio1", 1), "rx": ("gpio1", 0)},
+        }
+
+
+class TestUsedByZephyr:
+    """Fixed bus instances that Zephyr itself uses."""
+
+    DTS = """
+/dts-v1/;
+/ {
+    chosen {
+        zephyr,console = &uart0;
+    };
+    uart0: uart@0 {
+    };
+    uart1: uart@1 {
+    };
+    spi0: spi@0 {
+        flash@0 {
+            reg = <0>;
+        };
+    };
+    spi1: spi@1 {
+    };
+    spi2: spi@2 {
+    };
+    display {
+        spi-dev = <&spi1>;
+    };
+    disabled_display {
+        status = "disabled";
+        spi-dev = <&spi2>;
+    };
+};
+"""
+
+    def _used(self, label):
+        dt = parse_dts_string(self.DTS)
+        return _used_by_zephyr(dt, dt.label2node[label])
+
+    def test_chosen_console(self):
+        assert self._used("uart0")
+
+    def test_child_device(self):
+        assert self._used("spi0")
+
+    def test_referenced_by_phandle(self):
+        assert self._used("spi1")
+
+    def test_referenced_only_by_disabled_node(self):
+        assert not self._used("spi2")
+
+    def test_unused(self):
+        assert not self._used("uart1")
+
+
+class TestFastestFirst:
+    """Ordering of bus instance pools by devicetree max-frequency."""
+
+    @staticmethod
+    def _node(name, max_frequency=None):
+        props = {}
+        if max_frequency is not None:
+            props["max-frequency"] = SimpleNamespace(to_num=lambda: max_frequency)
+        return SimpleNamespace(name=name, props=props)
+
+    def test_highest_first(self):
+        nodes = [self._node("spi2", 8_000_000), self._node("spi3", 32_000_000)]
+        assert [n.name for n in _fastest_first(nodes)] == ["spi3", "spi2"]
+
+    def test_stable_for_equal_and_missing(self):
+        nodes = [
+            self._node("i2c1"),
+            self._node("spi22", 8_000_000),
+            self._node("i2c0"),
+            self._node("spi21", 8_000_000),
+            self._node("spi00", 32_000_000),
+        ]
+        assert [n.name for n in _fastest_first(nodes)] == [
+            "spi00",
+            "spi22",
+            "spi21",
+            "i2c1",
+            "i2c0",
+        ]

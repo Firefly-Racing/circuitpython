@@ -14,3 +14,6 @@ CIRCUITPY_ESP_PSRAM_FREQ = 200m
 # The chip's only USB port goes to a USB-A host jack.
 CIRCUITPY_USB_DEVICE = 0
 CIRCUITPY_USB_HOST = 1
+
+# 4.3 inch 800x480 RGB panel on the LCD connector
+CIRCUITPY_DOTCLOCKFRAMEBUFFER = 1
