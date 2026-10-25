@@ -23,9 +23,13 @@ from zephyr2cp import (
     find_ram_regions,
     BLOCKED_FLASH_COMPAT,
     MINIMUM_RAM_SIZE,
+    STEMMA_I2C_PINS,
     add_toml_pin_names,
+    _board_i2c_buses,
     _fastest_first,
+    _named_pins,
     _standard_bus_pins,
+    _toml_status_dotstar,
     _toml_status_pin,
     _used_by_zephyr,
 )
@@ -900,6 +904,54 @@ class TestUsedByZephyr:
         assert not self._used("uart1")
 
 
+class TestStemmaI2cPins:
+    """The pins of board.STEMMA_I2C, named by the stemma-qt-connector entry."""
+
+    def test_same_pins_as_i2c(self):
+        names = {("gpio0", 3): ["SCL", "STEMMA_SCL"], ("gpio0", 2): ["SDA", "STEMMA_SDA"]}
+        assert _named_pins(names, STEMMA_I2C_PINS) == {
+            "scl": ("gpio0", 3),
+            "sda": ("gpio0", 2),
+        }
+
+    def test_own_pins(self):
+        names = {
+            ("gpio0", 25): ["SCL"],
+            ("gpio0", 24): ["SDA"],
+            ("gpio0", 23): ["SCL1", "STEMMA_SCL"],
+            ("gpio0", 22): ["SDA1", "STEMMA_SDA"],
+        }
+        assert _named_pins(names, STEMMA_I2C_PINS) == {
+            "scl": ("gpio0", 23),
+            "sda": ("gpio0", 22),
+        }
+
+    def test_no_connector(self):
+        assert _named_pins({("gpio0", 3): ["SCL"], ("gpio0", 2): ["SDA"]}, STEMMA_I2C_PINS) is None
+
+
+class TestBoardI2cBuses:
+    """The board I2C buses for board.I2C() and board.STEMMA_I2C."""
+
+    I2C = {"scl": ("gpio0", 25), "sda": ("gpio0", 24)}
+    STEMMA = {"scl": ("gpio0", 23), "sda": ("gpio0", 22)}
+
+    def test_no_stemma_connector(self):
+        assert _board_i2c_buses(self.I2C, None) == ([self.I2C], None)
+
+    def test_stemma_on_the_i2c_pins(self):
+        assert _board_i2c_buses(self.I2C, dict(self.I2C)) == ([self.I2C], 0)
+
+    def test_stemma_on_other_pins(self):
+        assert _board_i2c_buses(self.I2C, self.STEMMA) == ([self.I2C, self.STEMMA], 1)
+
+    def test_stemma_without_standard_i2c(self):
+        assert _board_i2c_buses(None, self.STEMMA) == ([self.STEMMA], 0)
+
+    def test_neither(self):
+        assert _board_i2c_buses(None, None) == ([], None)
+
+
 class TestFastestFirst:
     """Ordering of bus instance pools by devicetree max-frequency."""
 
@@ -929,3 +981,32 @@ class TestFastestFirst:
             "i2c1",
             "i2c0",
         ]
+
+
+class TestTomlStatusDotstar:
+    """Resolution of circuitpython.toml STATUS_DOTSTAR_DATA/CLOCK keys."""
+
+    BOARD_NAMES = {
+        ("gpio0", 8): ["DOTSTAR_DATA"],
+        ("gpio1", 9): ["DOTSTAR_CLOCK"],
+        ("gpio0", 16): ["NEOPIXEL"],
+    }
+    DOTSTAR = {"STATUS_DOTSTAR_DATA": "DOTSTAR_DATA", "STATUS_DOTSTAR_CLOCK": "DOTSTAR_CLOCK"}
+
+    def test_resolves_data_and_clock(self):
+        assert _toml_status_dotstar(self.DOTSTAR, self.BOARD_NAMES) == (
+            ("gpio0", 8),
+            ("gpio1", 9),
+        )
+
+    def test_absent_keys_are_none(self):
+        assert _toml_status_dotstar({}, self.BOARD_NAMES) is None
+        assert _toml_status_dotstar(None, self.BOARD_NAMES) is None
+
+    def test_one_key_only_raises(self):
+        with pytest.raises(RuntimeError, match="needs both"):
+            _toml_status_dotstar({"STATUS_DOTSTAR_DATA": "DOTSTAR_DATA"}, self.BOARD_NAMES)
+
+    def test_with_status_neopixel_raises(self):
+        with pytest.raises(RuntimeError, match="both STATUS_NEOPIXEL and a status DotStar"):
+            _toml_status_dotstar({**self.DOTSTAR, "STATUS_NEOPIXEL": "NEOPIXEL"}, self.BOARD_NAMES)

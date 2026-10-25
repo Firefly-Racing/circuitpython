@@ -11,6 +11,17 @@
 		/delete-property/ zephyr,bt-mon-uart;
 		/delete-property/ zephyr,bt-c2h-uart;
 	};
+
+	// The STEMMA QT connector is on SCL/SDA, so board.STEMMA_I2C is the same
+	// bus as board.I2C(). The upstream board has no node for it.
+	stemma_connector: stemma_connector {
+		compatible = "stemma-qt-connector";
+		#gpio-cells = <2>;
+		gpio-map-mask = <0xffffffff 0xffffffc0>;
+		gpio-map-pass-thru = <0 0x3f>;
+		gpio-map = <0 0 &gpio0 25 0>,	/* SCL */
+			   <1 0 &gpio0 24 0>;	/* SDA */
+	};
 };
 
 &zephyr_udc0 {

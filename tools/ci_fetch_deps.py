@@ -96,7 +96,9 @@ PORT_DEPS = {
         "data/nvm.toml/",
     ],
     "zephyr-cp": [
+        "extmod/ulab/",
         "lib/certificates/",
+        "lib/mp3/",
         "lib/tinyusb/",
         "lib/tlsf",
     ],
@@ -155,6 +157,16 @@ def fetch(where):
             "Init mbedtls nested submodules",
             f"git submodule update --init {filter_maybe} {depth_maybe} tf-psa-crypto framework",
             cwd=mbedtls,
+        )
+
+    # ESP-Hosted keeps the protobuf-c runtime in a nested submodule.
+    esp_hosted = TOP / "ports" / "espressif" / "esp-hosted"
+    if (esp_hosted / ".gitmodules").exists():
+        depth_maybe = "" if clone_supports_filter else "--depth 1"
+        run(
+            "Init esp-hosted nested submodules",
+            f"git submodule update --init {filter_maybe} {depth_maybe} common/protobuf-c",
+            cwd=esp_hosted,
         )
 
 
