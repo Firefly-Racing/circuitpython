@@ -68,6 +68,7 @@ INC += \
 	-isystem esp-idf/components/esp_driver_gptimer/include \
 	-isystem esp-idf/components/esp_driver_i2c/include \
 	-isystem esp-idf/components/esp_driver_i2s/include \
+	-isystem esp-idf/components/esp_driver_jpeg/include \
 	-isystem esp-idf/components/esp_driver_ledc/include \
 	-isystem esp-idf/components/esp_driver_parlio/include \
 	-isystem esp-idf/components/esp_driver_pcnt/include \
@@ -122,7 +123,10 @@ INC += \
 	-isystem esp-idf/components/esp_hal_i2c/include \
 	-isystem esp-idf/components/esp_hal_i2s/include \
 	-isystem esp-idf/components/esp_hal_i2s/$(IDF_TARGET)/include \
+	-isystem esp-idf/components/esp_hal_jpeg/include \
+	-isystem esp-idf/components/esp_hal_jpeg/$(IDF_TARGET)/include \
 	-isystem esp-idf/components/esp_hal_ledc/include \
+	-isystem esp-idf/components/esp_hal_ledc/$(IDF_TARGET)/include \
 	-isystem esp-idf/components/esp_hal_pcnt/include \
 	-isystem esp-idf/components/esp_hal_rmt/include \
 	-isystem esp-idf/components/esp_hal_rmt/$(IDF_TARGET)/include \
@@ -228,6 +232,13 @@ REGISTRATION_FUNCTIONS = \
 	-u pthread_include_pthread_semaphore_impl \
 	-u esp_security_init_include_impl \
 	-u mbedtls_psa_crypto_init_include_impl
+
+# Video DMA destinations come from the Python heap (user bytearrays), and
+# the cache line is 64 bytes on the P4, so make GC blocks 64 bytes as well.
+# supervisor/port.c aligns the PSRAM heap areas to the same value.
+ifeq ($(IDF_TARGET),esp32p4)
+CFLAGS += -DMICROPY_BYTES_PER_GC_BLOCK=64
+endif
 
 # RISC-V picolibc ships optimized memcpy/memset/etc. that need forcing
 # (gated by CONFIG_LIBC_OPTIMIZED_MISALIGNED_ACCESS in IDF's esp_libc CMake).
@@ -490,6 +501,9 @@ CFLAGS += \
 	-isystem esp-idf/components/esp_hw_support/ldo/include \
 	-isystem esp-idf/components/esp_driver_touch_sens/hw_ver3/include
 
+# JPEG engine DMA writes into GC blocks, so make them one 64-byte cache line.
+CFLAGS += -DMICROPY_BYTES_PER_GC_BLOCK=64
+
 ifeq ($(CIRCUITPY_ESP32P4_REV),3)
 IDF_TARGET_ROM_FLOAT_LD = esp32p4.rom.rvfp.ld
 LDFLAGS += \
@@ -509,9 +523,12 @@ endif
 
 
 CHIP_COMPONENTS = \
+	esp_driver_cam \
+	esp_driver_isp \
 	esp_driver_touch_sens \
 	esp_driver_tsens \
 	esp_driver_usb_serial_jtag \
+	esp_hal_cam \
 	esp_hal_dma \
 	esp_hal_emac \
 	esp_hal_i2s \
@@ -525,6 +542,9 @@ CHIP_COMPONENTS = \
 
 else ifeq ($(IDF_TARGET),esp32s31)
 CFLAGS += -isystem esp-idf/components/esp_hw_support/ldo/include
+
+# JPEG engine DMA writes into GC blocks, so make them one 64-byte cache line.
+CFLAGS += -DMICROPY_BYTES_PER_GC_BLOCK=64
 
 IDF_TARGET_ROM_FLOAT_LD = esp32s31.rom.rvfp.ld
 LDFLAGS += \
@@ -741,6 +761,14 @@ CFLAGS += \
 	-isystem esp-idf/components/esp_lcd/dsi/include
 endif
 
+ifneq ($(CIRCUITPY_MIPICSI),0)
+CFLAGS += \
+	-isystem esp-idf/components/esp_driver_cam/include \
+	-isystem esp-idf/components/esp_driver_cam/csi/include \
+	-isystem esp-idf/components/esp_driver_isp/include \
+	-isystem esp-idf/components/esp_hal_cam/include
+endif
+
 ifneq ($(CIRCUITPY_ESPCAMERA),0)
 SRC_CAMERA := \
 	$(wildcard common-hal/espcamera/*.c) \
@@ -818,6 +846,11 @@ SRC_ULP := \
 	$(wildcard common-hal/espulp/*.c) \
 	$(wildcard bindings/espulp/*.c)
 SRC_C += $(SRC_ULP)
+endif
+
+ifneq ($(CIRCUITPY_JPEGIO_HW),0)
+SRC_C += common-hal/jpegio/JpegDecoder.c
+CHIP_COMPONENTS += esp_driver_jpeg esp_hal_jpeg
 endif
 
 ifneq ($(CIRCUITPY_NEOPIXEL_WRITE),0)
@@ -933,7 +966,11 @@ ifneq (,$(filter 1,$(CIRCUITPY_ENABLE_MPY_NATIVE) $(CIRCUITPY_LOAD_NATIVE)))
 	NATIVE_SDKCONFIG := ;esp-idf-config/sdkconfig-native.defaults
 endif
 
-SDKCONFIGS := esp-idf-config/sdkconfig.defaults;$(DEBUG_SDKCONFIG);$(FLASH_SIZE_SDKCONFIG);$(FLASH_MODE_SDKCONFIG);$(FLASH_SPEED_SDKCONFIG);$(PSRAM_SDKCONFIG);$(PSRAM_SIZE_SDKCONFIG);$(PSRAM_MODE_SDKCONFIG);$(PSRAM_SPEED_SDKCONFIG);$(BLE_SDKCONFIG)$(NATIVE_SDKCONFIG);$(TARGET_SDKCONFIG);boards/$(BOARD)/sdkconfig
+ifeq ($(CIRCUITPY_HARDWAREKEY),1)
+	HARDWAREKEY_SDKCONFIG := ;esp-idf-config/sdkconfig-hardwarekey.defaults
+endif
+
+SDKCONFIGS := esp-idf-config/sdkconfig.defaults;$(DEBUG_SDKCONFIG);$(FLASH_SIZE_SDKCONFIG);$(FLASH_MODE_SDKCONFIG);$(FLASH_SPEED_SDKCONFIG);$(PSRAM_SDKCONFIG);$(PSRAM_SIZE_SDKCONFIG);$(PSRAM_MODE_SDKCONFIG);$(PSRAM_SPEED_SDKCONFIG);$(BLE_SDKCONFIG)$(NATIVE_SDKCONFIG)$(HARDWAREKEY_SDKCONFIG);$(TARGET_SDKCONFIG);boards/$(BOARD)/sdkconfig
 
 # create the config headers
 .PHONY: do-sdkconfig
@@ -941,7 +978,7 @@ do-sdkconfig: $(BUILD)/esp-idf/config/sdkconfig.h
 QSTR_GLOBAL_REQUIREMENTS += $(BUILD)/esp-idf/config/sdkconfig.h
 $(BUILD)/esp-idf/config/sdkconfig.h: boards/$(BOARD)/sdkconfig boards/$(BOARD)/mpconfigboard.mk CMakeLists.txt | $(BUILD)/esp-idf
 	$(STEPECHO) "Create $@"
-	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -DCIRCUITPY_ESP_HOSTED=$(CIRCUITPY_ESP_HOSTED) -GNinja
+	$(Q)env IDF_PATH=$(IDF_PATH) IDF_COMPONENT_MANAGER=0 cmake -S . -B $(BUILD)/esp-idf -DSDKCONFIG=$(BUILD)/esp-idf/sdkconfig -DSDKCONFIG_DEFAULTS="$(SDKCONFIGS)" -DCMAKE_TOOLCHAIN_FILE=$(IDF_PATH)/tools/cmake/toolchain-$(IDF_TARGET).cmake -DIDF_TARGET=$(IDF_TARGET) -DCIRCUITPY_ESP_HOSTED=$(CIRCUITPY_ESP_HOSTED) -DCIRCUITPY_MIPICSI=$(CIRCUITPY_MIPICSI) -GNinja
 	$(Q)$(PYTHON) tools/check-sdkconfig.py \
 		CIRCUITPY_DUALBANK=$(CIRCUITPY_DUALBANK) \
 		CIRCUITPY_STORAGE_EXTEND=$(CIRCUITPY_STORAGE_EXTEND) \
@@ -1115,6 +1152,9 @@ endif
 ifneq ($(CIRCUITPY_MIPIDSI),0)
 	ESP_IDF_COMPONENTS_LINK += esp_lcd
 endif
+ifneq ($(CIRCUITPY_MIPICSI),0)
+	ESP_IDF_COMPONENTS_LINK += esp_driver_cam esp_driver_isp esp_hal_cam
+endif
 ifneq ($(CIRCUITPY_PARALLELDISPLAYBUS),0)
 	ESP_IDF_COMPONENTS_LINK += esp_lcd
 endif
@@ -1251,7 +1291,7 @@ endif
 
 UF2_FAMILY_ID_esp32s2 = 0xbfdd4eee
 UF2_FAMILY_ID_esp32s3 = 0xc47e5767
-UF2_FAMILY_ID_esp32p4 = 0x540ddf62
+UF2_FAMILY_ID_esp32p4 = 0x3d308e94
 
 $(BUILD)/firmware.uf2: $(BUILD)/circuitpython-firmware.bin
 	$(STEPECHO) "Create $@"

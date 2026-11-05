@@ -917,6 +917,7 @@ msgstr "사용중인 모든 UART주변 기기"
 #: ports/analog/peripherals/max32690/max32_uart.c
 #: ports/espressif/common-hal/_bleio/Service.c
 #: ports/espressif/common-hal/espulp/ULP.c
+#: ports/espressif/common-hal/jpegio/JpegDecoder.c
 #: ports/espressif/common-hal/microcontroller/Processor.c
 #: ports/espressif/common-hal/mipidsi/Display.c
 #: ports/mimxrt10xx/common-hal/audiobusio/__init__.c
@@ -931,7 +932,7 @@ msgstr "사용중인 모든 UART주변 기기"
 #: shared-bindings/i2cioexpander/IOPin.c shared-bindings/mipidsi/Display.c
 #: shared-bindings/pwmio/PWMOut.c shared-bindings/supervisor/__init__.c
 #: shared-module/aurora_epaper/aurora_framebuffer.c
-#: shared-module/lvfontio/OnDiskFont.c
+#: shared-module/jpegio/JpegDecoder.c shared-module/lvfontio/OnDiskFont.c
 msgid "Invalid %q"
 msgstr "잘못된 %q"
 
@@ -983,10 +984,9 @@ msgstr "모든 타이머가 사용 중입니다"
 #: ports/atmel-samd/common-hal/pulseio/PulseIn.c
 #: ports/atmel-samd/common-hal/rotaryio/IncrementalEncoder.c
 #: ports/cxd56/common-hal/pulseio/PulseIn.c
-#: ports/espressif/common-hal/mii/RMII.c
 #: ports/raspberrypi/common-hal/picodvi/Framebuffer_RP2350.c
+#: ports/zephyr-cp/common-hal/async_spi/SPI.c
 #: ports/zephyr-cp/common-hal/busio/I2C.c
-#: ports/zephyr-cp/common-hal/busio/SPI.c
 #: ports/zephyr-cp/common-hal/busio/UART.c
 msgid "Internal resource(s) in use"
 msgstr ""
@@ -1159,22 +1159,6 @@ msgstr "데이터 0 핀은 바이트 정렬되어야 합니다"
 msgid "Bus pin %d is already in use"
 msgstr "Bus 핀 %d은 이미 사용 중입니다"
 
-#: ports/atmel-samd/common-hal/picogame/Display.c
-#: ports/espressif/common-hal/espidf/__init__.c
-#: ports/raspberrypi/common-hal/picogame/Display.c
-#: ports/raspberrypi/common-hal/usb_host_bulk/InStream.c
-#: shared-bindings/picogame/Canvas.c shared-bindings/picogame/__init__.c
-msgid "Operation or feature not supported"
-msgstr "작업 또는 기능이 지원되지 않습니다"
-
-#: ports/atmel-samd/common-hal/picogame/Display.c
-#: ports/raspberrypi/common-hal/picogame/Display.c py/argcheck.c py/runtime.c
-#: shared-bindings/bitmapfilter/__init__.c
-#: shared-module/audiodelays/MultiTapDelay.c shared-module/synthio/Note.c
-#: shared-module/synthio/__init__.c
-msgid "%q must be of type %q, not %q"
-msgstr "%q는 %q가 아니라 %q 유형이어야 합니다"
-
 #: ports/atmel-samd/common-hal/pulseio/PulseIn.c
 #: ports/cxd56/common-hal/pulseio/PulseIn.c
 #: ports/nordic/common-hal/pulseio/PulseIn.c
@@ -1194,6 +1178,7 @@ msgid "Another send is already active"
 msgstr "다른 전송이 이미 활성화되었습니다"
 
 #: ports/atmel-samd/common-hal/sdioio/SDCard.c
+#: ports/espressif/common-hal/mii/Ethernet.c
 #: ports/espressif/common-hal/qspibus/QSPIBus.c shared-bindings/emmcio/EMMC.c
 #: shared-bindings/socketpool/SocketPool.c
 msgid "%q failure: %d"
@@ -1232,10 +1217,13 @@ msgstr ""
 #: shared-bindings/busdisplay/BusDisplay.c
 #: shared-bindings/framebufferio/FramebufferDisplay.c
 #: shared-bindings/struct/__init__.c shared-module/struct/__init__.c
+#: shared-module/videocore/VideoBuffer.c
 msgid "Buffer too small"
 msgstr "버퍼가 너무 작습니다"
 
-#: ports/cxd56/common-hal/camera/Camera.c shared-module/audiocore/WaveFile.c
+#: ports/cxd56/common-hal/camera/Camera.c
+#: ports/espressif/common-hal/jpegio/JpegDecoder.c
+#: shared-module/audiocore/WaveFile.c
 msgid "Format not supported"
 msgstr "지원되지 않는 형식입니다"
 
@@ -1535,7 +1523,8 @@ msgid "%q must be 8, 16, 24, or 32"
 msgstr ""
 
 #: ports/espressif/common-hal/audiobusio/__init__.c
-#: ports/espressif/common-hal/audioi2sin/I2SIn.c shared-bindings/emmcio/EMMC.c
+#: ports/espressif/common-hal/audioi2sin/I2SIn.c
+#: ports/espressif/common-hal/mii/Ethernet.c shared-bindings/emmcio/EMMC.c
 #, fuzzy
 msgid "Peripheral in use"
 msgstr "주변 기기가 사용 중입니다"
@@ -1582,6 +1571,8 @@ msgid "Can't construct AudioOut because continuous channel already open"
 msgstr ""
 
 #: ports/espressif/common-hal/audioio/AudioOut.c
+#: ports/espressif/common-hal/mipicsi/Camera.c
+#: shared-module/videocore/VideoBuffer.c
 msgid "already playing"
 msgstr ""
 
@@ -1601,7 +1592,7 @@ msgid "SPI configuration failed"
 msgstr ""
 
 #: ports/espressif/common-hal/busio/SPI.c ports/nordic/common-hal/busio/SPI.c
-#: ports/zephyr-cp/common-hal/busio/SPI.c
+#: ports/zephyr-cp/common-hal/async_spi/SPI.c
 msgid "All SPI peripherals are in use"
 msgstr "사용중인 모든 SPI주변 기기"
 
@@ -1642,6 +1633,30 @@ msgstr ""
 #: ports/espressif/common-hal/canio/CAN.c
 #, c-format
 msgid "twai_start returned esp-idf error #%d"
+msgstr ""
+
+#: ports/espressif/common-hal/cryptography/hazmat/primitives/asymmetric/rsa/DigitalSignatureKey.c
+msgid "ds_params has the wrong length"
+msgstr ""
+
+#: ports/espressif/common-hal/cryptography/hazmat/primitives/asymmetric/rsa/DigitalSignatureKey.c
+msgid ""
+"This key already committed to a different algorithm; call "
+"load_digital_signature_key() again to use a different one"
+msgstr ""
+
+#: ports/espressif/common-hal/cryptography/hazmat/primitives/asymmetric/rsa/DigitalSignatureKey.c
+msgid ""
+"This key's ds_params were replaced by a later load_digital_signature_key() "
+"call for the same key slot"
+msgstr ""
+
+#: ports/espressif/common-hal/cryptography/hazmat/primitives/asymmetric/rsa/DigitalSignatureKey.c
+msgid "ds_params is invalid for this key slot"
+msgstr ""
+
+#: ports/espressif/common-hal/cryptography/hazmat/primitives/asymmetric/rsa/DigitalSignatureKey.c
+msgid "Digital Signature peripheral not available on this chip"
 msgstr ""
 
 #: ports/espressif/common-hal/dotclockframebuffer/DotClockFramebuffer.c
@@ -1690,12 +1705,22 @@ msgid "Requested resource not found"
 msgstr ""
 
 #: ports/espressif/common-hal/espidf/__init__.c
+#: ports/espressif/common-hal/jpegio/JpegDecoder.c
+#: ports/raspberrypi/common-hal/usb_host_bulk/InStream.c
+#: shared-bindings/picogame/Canvas.c shared-bindings/picogame/__init__.c
+#: shared-module/jpegio/JpegDecoder.c shared-module/picogame/Display.c
+msgid "Operation or feature not supported"
+msgstr "작업 또는 기능이 지원되지 않습니다"
+
+#: ports/espressif/common-hal/espidf/__init__.c
 #: ports/espressif/common-hal/qspibus/QSPIBus.c
+#: shared-module/_airlift/__init__.c
 #, fuzzy
 msgid "Operation timed out"
 msgstr "작업 시간 초과되었습니다"
 
 #: ports/espressif/common-hal/espidf/__init__.c
+#: shared-module/_airlift/__init__.c
 msgid "Received response was invalid"
 msgstr "수신된 응답이 잘못되었습니다"
 
@@ -1732,8 +1757,8 @@ msgstr "프로그램이 너무 깁니다"
 #: ports/raspberrypi/common-hal/usb_host/Port.c
 #: shared-bindings/digitalio/DigitalInOut.c shared-bindings/emmcio/EMMC.c
 #: shared-bindings/i2cioexpander/IOPin.c shared-bindings/microcontroller/Pin.c
-#: shared-module/max3421e/Max3421E.c shared-module/usb/core/Device.c
-#: shared-module/usb_host_audio/USBIn.c
+#: shared-module/_airlift/__init__.c shared-module/max3421e/Max3421E.c
+#: shared-module/usb/core/Device.c shared-module/usb_host_audio/USBIn.c
 msgid "%q in use"
 msgstr "%q 사용 중입니다"
 
@@ -1773,6 +1798,21 @@ msgstr ""
 #: ports/raspberrypi/common-hal/memorymap/AddressRange.c
 msgid "Address range not allowed"
 msgstr "주소 범위가 허용되지 않습니다"
+
+#: ports/espressif/common-hal/mipicsi/Camera.c
+#: shared-bindings/displayio/TileGrid.c shared-bindings/terminalio/Terminal.c
+#: shared-bindings/tilepalettemapper/TilePaletteMapper.c
+#: shared-bindings/vectorio/VectorShape.c
+msgid "unsupported %q type"
+msgstr ""
+
+#: ports/espressif/common-hal/mipicsi/Camera.c
+msgid "output_format must be RGB565 or RGB888"
+msgstr ""
+
+#: ports/espressif/common-hal/mipicsi/Camera.c
+msgid "ISP conversion not supported on this chip"
+msgstr ""
 
 #: ports/espressif/common-hal/nvm/ByteArray.c
 msgid "NVS Error"
@@ -1900,7 +1940,8 @@ msgid "Only IPv4 addresses supported"
 msgstr "IPv4 주소만 지원됩니다"
 
 #: ports/mimxrt10xx/common-hal/busio/SPI.c
-#: ports/raspberrypi/bindings/wiznet/PIO_SPI.c shared-bindings/busio/SPI.c
+#: ports/raspberrypi/bindings/wiznet/PIO_SPI.c shared-bindings/async_spi/SPI.c
+#: shared-bindings/busio/SPI.c
 msgid "Must provide MISO or MOSI pin"
 msgstr "MISO 또는 MOSI 핀을 제공해야 합니다"
 
@@ -2017,6 +2058,7 @@ msgstr "오디오 변환이 구현되지 않음"
 #: shared-bindings/digitalio/Pull.c shared-bindings/picogame/Sprite.c
 #: shared-bindings/supervisor/__init__.c shared-module/audiofilters/__init__.c
 #: shared-module/displayio/__init__.c shared-module/synthio/Synthesizer.c
+#: shared-module/videocore/VideoBuffer.c
 msgid "%q must be of type %q or %q, not %q"
 msgstr "%q는 %q가 아닌 %q 또는 %q 유형이어야 합니다"
 
@@ -2052,20 +2094,24 @@ msgstr "출력 버퍼 요소의 길이는 <= 4 바이트 여야 합니다"
 msgid "In-buffer elements must be <= 4 bytes long"
 msgstr "버퍼 내 요소 길이는 <= 4여야 합니다"
 
-#: ports/raspberrypi/bindings/wiznet/PIO_SPI.c shared-bindings/bitbangio/I2C.c
-#: shared-bindings/bitbangio/SPI.c shared-bindings/busio/I2C.c
-#: shared-bindings/busio/SPI.c
+#: ports/raspberrypi/bindings/wiznet/PIO_SPI.c shared-bindings/async_spi/SPI.c
+#: shared-bindings/bitbangio/I2C.c shared-bindings/bitbangio/SPI.c
+#: shared-bindings/busio/I2C.c shared-bindings/busio/SPI.c
 msgid "Function requires lock"
 msgstr "이 함수에는 잠금이 필요합니다"
 
-#: ports/raspberrypi/bindings/wiznet/PIO_SPI.c shared-bindings/bitbangio/SPI.c
-#: shared-bindings/busio/SPI.c
+#: ports/raspberrypi/bindings/wiznet/PIO_SPI.c shared-bindings/async_spi/SPI.c
+#: shared-bindings/bitbangio/SPI.c shared-bindings/busio/SPI.c
 msgid "buffer slices must be of equal length"
 msgstr ""
 
 #: ports/raspberrypi/common-hal/alarm/touch/TouchAlarm.c
 #: ports/stm/common-hal/alarm/touch/TouchAlarm.c
 msgid "Touch alarms not available"
+msgstr ""
+
+#: ports/raspberrypi/common-hal/async_spi/SPI.c shared-bindings/emmcio/EMMC.c
+msgid "SPI peripheral in use"
 msgstr ""
 
 #: ports/raspberrypi/common-hal/audiobusio/I2SOut.c
@@ -2106,10 +2152,6 @@ msgstr "DMA 간격 타이머를 찾을 수 없습니다"
 #: ports/raspberrypi/common-hal/i2ctarget/I2CTarget.c
 msgid "I2C peripheral in use"
 msgstr "I2C 주변 기기가 사용 중입니다"
-
-#: ports/raspberrypi/common-hal/busio/SPI.c shared-bindings/emmcio/EMMC.c
-msgid "SPI peripheral in use"
-msgstr ""
 
 #: ports/raspberrypi/common-hal/busio/UART.c
 msgid "UART peripheral in use"
@@ -2471,9 +2513,9 @@ msgstr "이미 사용된 그룹"
 msgid "Invalid advertising data"
 msgstr ""
 
+#: ports/zephyr-cp/common-hal/async_spi/SPI.c
 #: ports/zephyr-cp/common-hal/audiobusio/I2SOut.c
 #: ports/zephyr-cp/common-hal/busio/I2C.c
-#: ports/zephyr-cp/common-hal/busio/SPI.c
 #: ports/zephyr-cp/common-hal/busio/UART.c
 msgid "Use device tree to define %q devices"
 msgstr ""
@@ -2556,10 +2598,16 @@ msgid "%q must be >= %d"
 msgstr "%q 는 >= %d 여야 합니다"
 
 #: py/argcheck.c shared-bindings/gifio/GifWriter.c
-#: shared-module/gifio/OnDiskGif.c
+#: shared-module/_airlift/__init__.c shared-module/gifio/OnDiskGif.c
 #, fuzzy
 msgid "%q must be <= %d"
 msgstr "%q 는 <= %d 여야 합니다"
+
+#: py/argcheck.c py/runtime.c shared-bindings/bitmapfilter/__init__.c
+#: shared-module/audiodelays/MultiTapDelay.c shared-module/synthio/Note.c
+#: shared-module/synthio/__init__.c
+msgid "%q must be of type %q, not %q"
+msgstr "%q는 %q가 아니라 %q 유형이어야 합니다"
 
 #: py/argcheck.c
 msgid "%q length must be %d-%d"
@@ -2569,7 +2617,7 @@ msgstr "%q 길이는 %d - %d이어야 합니다"
 msgid "%q length must be >= %d"
 msgstr "%q 길이는 >= %d이어야 합니다"
 
-#: py/argcheck.c
+#: py/argcheck.c shared-module/_airlift/__init__.c
 msgid "%q length must be <= %d"
 msgstr "%q 길이는 <= %d>여야 합니다"
 
@@ -4033,7 +4081,7 @@ msgstr ""
 #: shared-bindings/audiodelays/PitchShift.c
 #: shared-bindings/audiofilters/Distortion.c
 #: shared-bindings/audiofilters/Filter.c shared-bindings/audiofilters/Phaser.c
-#: shared-bindings/audiomixer/Mixer.c
+#: shared-bindings/audiomixer/Mixer.c shared-module/audiotap/Tap.c
 msgid "bits_per_sample must be 8 or 16"
 msgstr "bits_per_sample은 8 또는 16이어야합니다"
 
@@ -4054,8 +4102,7 @@ msgstr ""
 msgid "%q and %q must be different"
 msgstr "%q와 %q는 달라야 합니다"
 
-#: shared-bindings/audiomp3/MP3Decoder.c
-#: shared-bindings/displayio/OnDiskBitmap.c shared-bindings/gifio/OnDiskGif.c
+#: shared-bindings/audiomp3/MP3Decoder.c shared-bindings/gifio/OnDiskGif.c
 #: shared-bindings/synthio/__init__.c shared-module/gifio/GifWriter.c
 msgid "file must be a file opened in byte mode"
 msgstr ""
@@ -4194,6 +4241,20 @@ msgstr "%q의 하위클래스여야 합니다."
 msgid "RemoteTransmissionRequests limited to 8 bytes"
 msgstr ""
 
+#: shared-bindings/cryptography/hazmat/primitives/asymmetric/padding/__init__.c
+#: shared-bindings/cryptography/hazmat/primitives/asymmetric/rsa/DigitalSignatureKey.c
+msgid "Only %q supported"
+msgstr ""
+
+#: shared-bindings/cryptography/hazmat/primitives/asymmetric/padding/__init__.c
+msgid "label is not supported"
+msgstr ""
+
+#: shared-bindings/cryptography/hazmat/primitives/asymmetric/rsa/__init__.c
+#: shared-bindings/hmac/__init__.c
+msgid "key does not have the expected %q purpose"
+msgstr ""
+
 #: shared-bindings/digitalio/DigitalInOut.c
 #: shared-bindings/i2cioexpander/IOPin.c
 msgid "Cannot set value when direction is input."
@@ -4252,12 +4313,6 @@ msgstr ""
 msgid "color buffer must be a buffer, tuple, list, or int"
 msgstr ""
 
-#: shared-bindings/displayio/TileGrid.c shared-bindings/terminalio/Terminal.c
-#: shared-bindings/tilepalettemapper/TilePaletteMapper.c
-#: shared-bindings/vectorio/VectorShape.c
-msgid "unsupported %q type"
-msgstr ""
-
 #: shared-bindings/displayio/TileGrid.c
 msgid "Tile width must exactly divide bitmap width"
 msgstr ""
@@ -4298,10 +4353,6 @@ msgstr ""
 
 #: shared-bindings/hashlib/__init__.c shared-bindings/hmac/__init__.c
 msgid "Unsupported hash algorithm"
-msgstr ""
-
-#: shared-bindings/hmac/__init__.c
-msgid "hardware key slot is unused"
 msgstr ""
 
 #: shared-bindings/i2cioexpander/IOExpander.c
@@ -4579,6 +4630,10 @@ msgstr ""
 msgid "unsupported bitmap depth"
 msgstr ""
 
+#: shared-module/cryptography/hazmat/primitives/asymmetric/rsa/DigitalSignatureKey.c
+msgid "OAEP requires this build to enable TLS 1.3 support"
+msgstr ""
+
 #: shared-module/displayio/Bitmap.c
 msgid "Invalid bits per value"
 msgstr "값 당 잘못된 비트"
@@ -4837,6 +4892,46 @@ msgstr ""
 #: shared-module/vectorio/Polygon.c
 msgid "Polygon needs at least 3 points"
 msgstr "다각형은 최소 3개의 점이 필요합니다"
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "framebuffer went away"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "video doesn't fit in framebuffer"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "framebuffer missing required functions"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "video format must be byte aligned"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "video format doesn't match framebuffer"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "video source rejected the destination"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "video in a framebuffer must be at x == 0"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "video size changed since play; stop and play again"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "VideoBuffer does not support transforms"
+msgstr ""
+
+#: shared-module/videocore/VideoBuffer.c
+msgid "VideoBuffer is playing into a different framebuffer"
+msgstr ""
 
 #: supervisor/shared/bluetooth/bluetooth.c
 msgid "Reconnecting"

@@ -91,6 +91,7 @@ CIRCUITPY_ESPULP ?= 1
 CIRCUITPY_FRAMEBUFFERIO ?= 1
 CIRCUITPY_FREQUENCYIO ?= 1
 CIRCUITPY_HARDWAREKEY ?= 1
+CIRCUITPY_CRYPTOGRAPHY ?= 1
 CIRCUITPY_HASHLIB ?= 1
 CIRCUITPY_I2CTARGET = 0
 CIRCUITPY_MAX3421E ?= 1
@@ -119,6 +120,7 @@ CIRCUITPY_RGBMATRIX = 0
 
 # No HMAC peripheral (introduced starting with ESP32-S2)
 CIRCUITPY_HARDWAREKEY = 0
+CIRCUITPY_CRYPTOGRAPHY = 0
 
 # Has no USB
 CIRCUITPY_USB_DEVICE = 0
@@ -138,6 +140,7 @@ CIRCUITPY_MEMORYMAP = 0
 
 # No HMAC peripheral (SOC_HMAC_SUPPORTED is not defined for this target)
 CIRCUITPY_HARDWAREKEY = 0
+CIRCUITPY_CRYPTOGRAPHY = 0
 
 # No capacitive touch peripheral
 CIRCUITPY_ALARM_TOUCH = 0
@@ -295,6 +298,7 @@ CIRCUITPY_RGBMATRIX = 0
 
 # No HMAC peripheral (SOC_HMAC_SUPPORTED is not defined for this target)
 CIRCUITPY_HARDWAREKEY = 0
+CIRCUITPY_CRYPTOGRAPHY = 0
 
 # No capacitive touch peripheral
 CIRCUITPY_ALARM_TOUCH = 0
@@ -406,6 +410,15 @@ CIRCUITPY_ESPCAMERA = 0
 # P4 has MIPI-DSI
 CIRCUITPY_MIPIDSI = 1
 
+# P4 has MIPI-CSI
+CIRCUITPY_MIPICSI = 1
+
+# P4 can play MIPI-CSI video into MIPI-DSI framebuffers
+CIRCUITPY_VIDEOCORE = 1
+
+# Hardware JPEG decoder
+CIRCUITPY_JPEGIO_HW ?= $(CIRCUITPY_JPEGIO)
+
 #### esp32s31 #########################################################
 else ifeq ($(IDF_TARGET),esp32s31)
 
@@ -439,6 +452,11 @@ CIRCUITPY_ESPULP = 0
 
 # The S31 has five eFuse key blocks, not six.
 CIRCUITPY_HARDWAREKEY = 0
+# DigitalSignatureKey takes a HardwareKey, so it's meaningless without one.
+CIRCUITPY_CRYPTOGRAPHY = 0
+
+# Hardware JPEG decoder
+CIRCUITPY_JPEGIO_HW ?= $(CIRCUITPY_JPEGIO)
 
 # No I80 support from the IDF
 CIRCUITPY_PARALLELDISPLAYBUS = 0
@@ -457,6 +475,9 @@ else ifeq ($(IDF_TARGET),esp32s2)
 CIRCUITPY_MII = 0
 CIRCUITPY_AUDIOIO ?= 1
 CIRCUITPY_AUDIOFILEWRITER ?= 1
+
+# LEDC + GPTimer PWM audio, for boards whose speaker is not on a DAC pin.
+CIRCUITPY_AUDIOPWMIO ?= 1
 
 # No I2S peripheral PDM-to-PCM hardware support
 CIRCUITPY_AUDIOBUSIO_PDMIN = 0
@@ -480,6 +501,9 @@ CIRCUITPY_ESP_USB_SERIAL_JTAG ?= 0
 
 # No DAC
 CIRCUITPY_AUDIOIO = 0
+
+# LEDC + GPTimer PWM audio, the only analog audio output without I2S hardware.
+CIRCUITPY_AUDIOPWMIO ?= 1
 
 endif
 #### end chip-specific choices ########################################
@@ -549,8 +573,8 @@ USB_NUM_IN_ENDPOINTS = 5
 # only thing a user needs, with no custom build.
 ifeq ($(IDF_TARGET),esp32s3)
 # It needs the TinyUSB device stack and audiocore, so leave it off for boards
-# that turn either off. The S3 has no AUDIOIO and no AUDIOPWMIO, so audiocore
-# follows CIRCUITPY_AUDIOBUSIO here.
+# that turn either off. CIRCUITPY_AUDIOCORE is not set yet at this point, so
+# boards that drop audio are recognized by CIRCUITPY_AUDIOBUSIO = 0 instead.
 ifeq ($(filter 0,$(CIRCUITPY_USB_DEVICE) $(CIRCUITPY_AUDIOCORE) $(CIRCUITPY_AUDIOBUSIO)),)
 CIRCUITPY_USB_AUDIO ?= 1
 endif

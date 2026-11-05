@@ -7,6 +7,7 @@
 // Include strchrnul()
 #define _GNU_SOURCE
 
+#include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,12 +19,12 @@
 #include "py/mpstate.h"
 #include "py/persistentcode.h"
 
-#include "shared-bindings/wifi/Radio.h"
 #include "supervisor/filesystem.h"
 #include "supervisor/port.h"
 #include "supervisor/shared/reload.h"
 #include "supervisor/shared/web_workflow/web_workflow.h"
 #include "supervisor/shared/web_workflow/websocket.h"
+#include "supervisor/shared/web_workflow/display_stream.h"
 #include "supervisor/shared/workflow.h"
 
 #include "shared-bindings/hashlib/__init__.h"
@@ -49,11 +50,18 @@
 #if CIRCUITPY_WIFI
 #include "common-hal/wifi/__init__.h"
 #include "shared-bindings/wifi/__init__.h"
+#include "shared-bindings/wifi/Radio.h"
 #endif
 
 #if CIRCUITPY_MII
 #include "shared-bindings/mii/__init__.h"
 #include "shared-bindings/mii/Ethernet.h"
+#endif
+
+#if CIRCUITPY_AIRLIFT
+#include "shared-module/_airlift/network.h"
+#include "shared-module/_airlift/transport.h"
+#include "supervisor/shared/tick.h"
 #endif
 
 #if CIRCUITPY_SETTINGS_TOML
@@ -97,7 +105,7 @@ typedef struct {
 static wifi_radio_error_t _wifi_status = WIFI_RADIO_ERROR_NONE;
 #endif
 
-#if CIRCUITPY_STATUS_BAR && (CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII)
+#if CIRCUITPY_STATUS_BAR && (CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII || CIRCUITPY_AIRLIFT)
 // Store various last states to compute if status bar needs an update.
 static bool _last_enabled = false;
 static uint32_t _last_ip = 0;
@@ -106,6 +114,10 @@ static mp_int_t _last_web_api_port = 80;
 
 #if CIRCUITPY_STATUS_BAR && CIRCUITPY_WIFI
 static wifi_radio_error_t _last_wifi_status = WIFI_RADIO_ERROR_NONE;
+#endif
+
+#if CIRCUITPY_STATUS_BAR && CIRCUITPY_AIRLIFT
+static uint8_t _last_airlift_status = AIRLIFT_WL_NO_SHIELD;
 #endif
 
 #if CIRCUITPY_MDNS
@@ -213,6 +225,13 @@ static bool _get_web_workflow_ip(uint32_t *ipv4_address) {
     }
     *ipv4_address = mii_get_ipv4_address();
     return true;
+    #elif CIRCUITPY_AIRLIFT
+    // Cached, so the status bar doesn't cause SPI traffic.
+    if (!airlift_transport_active()) {
+        return false;
+    }
+    *ipv4_address = airlift_network_ipv4_address();
+    return true;
     #else
     return false;
     #endif
@@ -260,7 +279,7 @@ mdns_server_obj_t *supervisor_web_workflow_mdns(mp_obj_t network_interface) {
 
 #if CIRCUITPY_STATUS_BAR
 bool supervisor_web_workflow_status_dirty(void) {
-    #if CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII
+    #if CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII || CIRCUITPY_AIRLIFT
     uint32_t ipv4_address = 0;
     bool enabled = _get_web_workflow_ip(&ipv4_address);
     if (enabled != _last_enabled || ipv4_address != _last_ip || web_api_port != _last_web_api_port) {
@@ -268,6 +287,11 @@ bool supervisor_web_workflow_status_dirty(void) {
     }
     #if CIRCUITPY_WIFI
     if (_last_wifi_status != _wifi_status) {
+        return true;
+    }
+    #endif
+    #if CIRCUITPY_AIRLIFT
+    if (_last_airlift_status != airlift_network_status()) {
         return true;
     }
     #endif
@@ -280,7 +304,7 @@ bool supervisor_web_workflow_status_dirty(void) {
 
 #if CIRCUITPY_STATUS_BAR
 void supervisor_web_workflow_status(void) {
-    #if CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII
+    #if CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII || CIRCUITPY_AIRLIFT
     uint32_t ipv4_address = 0;
     _last_enabled = _get_web_workflow_ip(&ipv4_address);
     _last_web_api_port = web_api_port;
@@ -313,6 +337,17 @@ void supervisor_web_workflow_status(void) {
     #elif CIRCUITPY_MII
     _last_ip = 0;
     serial_write_compressed(MP_ERROR_TEXT("No IP"));
+    #elif CIRCUITPY_AIRLIFT
+    serial_write_compressed(MP_ERROR_TEXT("Wi-Fi: "));
+    _last_airlift_status = airlift_network_status();
+    if (!_last_enabled) {
+        serial_write_compressed(MP_ERROR_TEXT("off"));
+    } else if (_last_airlift_status == AIRLIFT_WL_CONNECT_FAILED) {
+        serial_write_compressed(MP_ERROR_TEXT("Authentication failure"));
+    } else {
+        _last_ip = 0;
+        serial_write_compressed(MP_ERROR_TEXT("No IP"));
+    }
     #endif
     #else
     return;
@@ -320,8 +355,83 @@ void supervisor_web_workflow_status(void) {
 }
 #endif
 
+#if CIRCUITPY_WEB_WORKFLOW && CIRCUITPY_SETTINGS_TOML && (CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII || CIRCUITPY_AIRLIFT)
+// Reads CIRCUITPY_WEB_API_PASSWORD into _api_password, encoded for HTTP basic
+// auth. Returns false if it isn't set.
+static bool _get_api_password(void) {
+    const size_t api_password_len = sizeof(_api_password) - 1;
+    settings_err_t result = settings_get_str("CIRCUITPY_WEB_API_PASSWORD", _api_password + 1, api_password_len);
+    if (result != SETTINGS_OK) {
+        return false;
+    }
+    _api_password[0] = ':';
+    _base64_in_place(_api_password, strlen(_api_password), sizeof(_api_password) - 1);
+    return true;
+}
+#endif
+
+#if CIRCUITPY_WEB_WORKFLOW && CIRCUITPY_SETTINGS_TOML && (CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII || CIRCUITPY_AIRLIFT)
+static bool _open_listening(void) {
+    #if CIRCUITPY_SOCKETPOOL_IPV6
+    bool opened = socketpool_socket(&pool, SOCKETPOOL_AF_INET6, SOCKETPOOL_SOCK_STREAM, 0, &listening);
+    #else
+    bool opened = socketpool_socket(&pool, SOCKETPOOL_AF_INET, SOCKETPOOL_SOCK_STREAM, 0, &listening);
+    #endif
+    // Ports with an offloaded network stack can refuse to create a
+    // socket until the interface has an address (this board returns
+    // ENOTCONN before DHCP completes). Binding and listening on the
+    // unset descriptor then fails with EBADF, and reporting success
+    // leaves the supervisor polling a socket that was never opened.
+    //
+    // Returning false avoids that but is not a retry: the background
+    // callback never re-enters this function, so the next attempt is
+    // the next supervisor_workflow_reset(), i.e. a VM restart. A board
+    // that only gets an address after boot will not bring the workflow
+    // up on its own until then. (AirLift boards do retry; see
+    // _airlift_retry_listening().)
+    if (!opened) {
+        return false;
+    }
+    common_hal_socketpool_socket_settimeout(&listening, 0);
+    if (common_hal_socketpool_socket_bind(&listening, "", 0, web_api_port) != 0) {
+        common_hal_socketpool_socket_close(&listening);
+        return false;
+    }
+    if (!common_hal_socketpool_socket_listen(&listening, 1)) {
+        common_hal_socketpool_socket_close(&listening);
+        return false;
+    }
+    #if CIRCUITPY_DISPLAYIO
+    display_stream_listen(&pool);
+    #endif
+    return true;
+}
+#endif
+
+#if CIRCUITPY_AIRLIFT
+// User code may reset the ESP32 or change its network, which closes the
+// listening socket, and nothing calls back when the network comes back. So the
+// background pass reopens it: right away after a reset, otherwise at most every
+// 5 seconds. It is never closed to reopen it; nina-fw can't stop a listener.
+static void _airlift_retry_listening(void) {
+    static uint64_t last_try_ms;
+    static uint32_t last_try_generation;
+    if (!common_hal_socketpool_socket_get_closed(&listening) ||
+        airlift_network_status() != AIRLIFT_WL_CONNECTED) {
+        return;
+    }
+    uint64_t now = supervisor_ticks_ms64();
+    if (last_try_generation == airlift_transport_generation() && now - last_try_ms < 5000) {
+        return;
+    }
+    last_try_ms = now;
+    last_try_generation = airlift_transport_generation();
+    _open_listening();
+}
+#endif
+
 bool supervisor_start_web_workflow(void) {
-    #if CIRCUITPY_WEB_WORKFLOW && CIRCUITPY_SETTINGS_TOML && (CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII)
+    #if CIRCUITPY_WEB_WORKFLOW && CIRCUITPY_SETTINGS_TOML && (CIRCUITPY_WIFI || CIRCUITPY_HOSTNETWORK || CIRCUITPY_MII || CIRCUITPY_AIRLIFT)
 
     #if CIRCUITPY_WIFI
     mp_obj_t socketpool_radio = MP_OBJ_FROM_PTR(&common_hal_wifi_radio_obj);
@@ -331,13 +441,15 @@ bool supervisor_start_web_workflow(void) {
         // The board never registered its ethernet instance.
         return false;
     }
+    #elif CIRCUITPY_AIRLIFT
+    mp_obj_t socketpool_radio = MP_OBJ_FROM_PTR(&airlift_socketpool_interface);
     #else
     mp_obj_t socketpool_radio = MP_OBJ_FROM_PTR(&common_hal_hostnetwork_obj);
     #endif
 
     settings_err_t result;
 
-    #if CIRCUITPY_WIFI
+    #if CIRCUITPY_WIFI || CIRCUITPY_AIRLIFT
     char ssid[33];
     char password[64];
 
@@ -353,7 +465,9 @@ bool supervisor_start_web_workflow(void) {
     } else if (result != SETTINGS_OK) {
         return false;
     }
+    #endif
 
+    #if CIRCUITPY_WIFI
     if (!common_hal_wifi_radio_get_enabled(&common_hal_wifi_radio_obj)) {
         common_hal_wifi_init(false);
         common_hal_wifi_radio_set_enabled(&common_hal_wifi_radio_obj, true);
@@ -374,6 +488,21 @@ bool supervisor_start_web_workflow(void) {
         common_hal_wifi_radio_set_enabled(&common_hal_wifi_radio_obj, false);
         return false;
     }
+    #elif CIRCUITPY_AIRLIFT
+    // Without an API password there's no web workflow, so leave the ESP32 to
+    // user code. Native Wi-Fi connects without one, so this is read here only
+    // for AirLift, before the ESP32 is touched.
+    if (!_get_api_password()) {
+        return false;
+    }
+
+    if (!airlift_transport_init()) {
+        return false;
+    }
+
+    // Returns early if already connected to this network, so the open
+    // connections survive. If it fails, the background keeps trying.
+    airlift_network_join(ssid, password);
     #endif
 
     #if CIRCUITPY_MII && !CIRCUITPY_WIFI
@@ -410,12 +539,7 @@ bool supervisor_start_web_workflow(void) {
         // (leaves new_port unchanged on any failure)
         (void)settings_get_int("CIRCUITPY_WEB_API_PORT", &web_api_port);
 
-        const size_t api_password_len = sizeof(_api_password) - 1;
-        result = settings_get_str("CIRCUITPY_WEB_API_PASSWORD", _api_password + 1, api_password_len);
-        if (result == SETTINGS_OK) {
-            _api_password[0] = ':';
-            _base64_in_place(_api_password, strlen(_api_password), sizeof(_api_password) - 1);
-        } else { // Skip starting web-workflow when no password is passed.
+        if (!_get_api_password()) { // Skip starting web-workflow when no password is passed.
             return false;
         }
 
@@ -426,6 +550,14 @@ bool supervisor_start_web_workflow(void) {
         socketpool_socket_reset(&active);
 
         websocket_init();
+        #if CIRCUITPY_DISPLAYIO
+        display_stream_init();
+        mp_int_t vnc_port = 0;
+        (void)settings_get_int("CIRCUITPY_WEB_VNC_PORT", &vnc_port);
+        bool vnc_keys = false;
+        (void)settings_get_bool("CIRCUITPY_WEB_VNC_KEYS", &vnc_keys);
+        display_stream_set_vnc(vnc_port, vnc_keys);
+        #endif
     }
 
     initialized = pool.base.type == &socketpool_socketpool_type;
@@ -450,35 +582,13 @@ bool supervisor_start_web_workflow(void) {
         }
         #endif
 
-        if (common_hal_socketpool_socket_get_closed(&listening)) {
-            #if CIRCUITPY_SOCKETPOOL_IPV6
-            bool opened = socketpool_socket(&pool, SOCKETPOOL_AF_INET6, SOCKETPOOL_SOCK_STREAM, 0, &listening);
+        if (common_hal_socketpool_socket_get_closed(&listening) && !_open_listening()) {
+            #if CIRCUITPY_AIRLIFT
+            // Report success anyway, so the background callback is installed:
+            // it keeps trying (_airlift_retry_listening()).
             #else
-            bool opened = socketpool_socket(&pool, SOCKETPOOL_AF_INET, SOCKETPOOL_SOCK_STREAM, 0, &listening);
+            return false;
             #endif
-            // Ports with an offloaded network stack can refuse to create a
-            // socket until the interface has an address (this board returns
-            // ENOTCONN before DHCP completes). Binding and listening on the
-            // unset descriptor then fails with EBADF, and reporting success
-            // leaves the supervisor polling a socket that was never opened.
-            //
-            // Returning false avoids that but is not a retry: the background
-            // callback never re-enters this function, so the next attempt is
-            // the next supervisor_workflow_reset(), i.e. a VM restart. A board
-            // that only gets an address after boot will not bring the workflow
-            // up on its own until then.
-            if (!opened) {
-                return false;
-            }
-            common_hal_socketpool_socket_settimeout(&listening, 0);
-            if (common_hal_socketpool_socket_bind(&listening, "", 0, web_api_port) != 0) {
-                common_hal_socketpool_socket_close(&listening);
-                return false;
-            }
-            if (!common_hal_socketpool_socket_listen(&listening, 1)) {
-                common_hal_socketpool_socket_close(&listening);
-                return false;
-            }
         }
         // Wake polling thread (maybe)
         socketpool_socket_poll_resume();
@@ -1193,6 +1303,10 @@ STATIC_FILE(edit_js);
 STATIC_FILE(style_css);
 STATIC_FILE(serial_html);
 STATIC_FILE(serial_js);
+#if CIRCUITPY_DISPLAYIO
+STATIC_FILE(display_html);
+STATIC_FILE(display_js);
+#endif
 STATIC_FILE(blinka_32x32_ico);
 
 static void _reply_static(socketpool_socket_obj_t *socket, _request *request, const uint8_t *response, size_t response_len, const char *content_type) {
@@ -1234,6 +1348,12 @@ static void _reply_websocket_upgrade(socketpool_socket_obj_t *socket, _request *
         "Connection: Upgrade\r\n",
         "Sec-WebSocket-Accept: ", encoded_accept, "\r\n",
         "\r\n", NULL);
+    #if CIRCUITPY_DISPLAYIO
+    if (strcmp(request->path, "/cp/display/") == 0) {
+        display_stream_handoff(socket, true);
+        return;
+    }
+    #endif
     websocket_handoff(socket);
     // socket is now closed and "disconnected".
 }
@@ -1470,6 +1590,20 @@ static bool _reply(socketpool_socket_obj_t *socket, _request *request) {
             } else {
                 _REPLY_STATIC(socket, request, serial_html);
             }
+        #if CIRCUITPY_DISPLAYIO
+        } else if (strcmp(path, "/display/") == 0) {
+            if (!request->authenticated) {
+                if (_api_password[0] != '\0') {
+                    _reply_unauthorized(socket, request);
+                } else {
+                    _reply_forbidden(socket, request);
+                }
+            } else if (request->websocket) {
+                _reply_websocket_upgrade(socket, request);
+            } else {
+                _REPLY_STATIC(socket, request, display_html);
+            }
+        #endif
         } else {
             _reply_missing(socket, request);
         }
@@ -1486,6 +1620,10 @@ static bool _reply(socketpool_socket_obj_t *socket, _request *request) {
             _REPLY_STATIC(socket, request, welcome_js);
         } else if (strcmp(request->path, "/serial.js") == 0) {
             _REPLY_STATIC(socket, request, serial_js);
+        #if CIRCUITPY_DISPLAYIO
+        } else if (strcmp(request->path, "/display.js") == 0) {
+            _REPLY_STATIC(socket, request, display_js);
+        #endif
         } else if (strcmp(request->path, "/edit.js") == 0) {
             _REPLY_STATIC(socket, request, edit_js);
         } else if (strcmp(request->path, "/style.css") == 0) {
@@ -1690,6 +1828,16 @@ static bool supervisor_filesystem_access_could_block(void) {
 }
 
 void supervisor_web_workflow_background(void *data) {
+    #if CIRCUITPY_AIRLIFT
+    // Skip this pass while a command is in flight or the bus is in use, so
+    // nothing here waits for something that can't finish until it returns.
+    if (!airlift_socketpool_background()) {
+        socketpool_socket_poll_resume();
+        return;
+    }
+    _airlift_retry_listening();
+    #endif
+
     // If "/sd" is mounted AND shared with a display, access could block.
     // We don't have a good way to defer a filesystem action way down inside _process_request
     // when this happens, so just postpone if there's a chance of blocking. (#8980)
@@ -1729,10 +1877,20 @@ void supervisor_web_workflow_background(void *data) {
             }
             break;
         }
+        // Nothing to accept from, for example while the listening socket is
+        // closed. Without this the loop never ends.
+        break;
     }
 
     // Let the websocket code run.
     websocket_background();
+    #if CIRCUITPY_DISPLAYIO
+    display_stream_background();
+    #endif
+
+    #if CIRCUITPY_AIRLIFT
+    airlift_socketpool_background_done();
+    #endif
 
     // Resume polling
     socketpool_socket_poll_resume();

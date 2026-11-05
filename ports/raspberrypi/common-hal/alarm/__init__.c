@@ -40,11 +40,8 @@
 #if PICO_RP2350
 #include "hardware/powman.h"
 #include "pico/low_power.h"
+#include "pico/multicore.h"
 #endif
-
-// Watchdog scratch register
-// Not used elsewhere in the SDK for now, keep an eye on it
-#define RP_WKUP_SCRATCH_REG 0
 
 // Light sleep turns off nonvolatile Busio and other wake-only peripherals
 // TODO: this only saves about 2mA right now, expand with other non-essentials
@@ -252,6 +249,10 @@ static void MP_NORETURN rp2350_enter_deep_sleep(void) {
     cyw43_enter_deep_sleep();
     #endif
 
+    // Powman does not power down until both cores are in __wfi(). Core1 may be
+    // busy, for example running the PIO USB host loop, so park it in the bootrom.
+    multicore_reset_core1();
+
     // pico_low_power arms one wakeup per call and leaves the others alone, so
     // arm every pin alarm first.
     alarm_pin_pinalarm_enable_powman_wakeups();
@@ -304,6 +305,7 @@ void MP_NORETURN common_hal_alarm_enter_deep_sleep(void) {
 
     // Reset uses the watchdog. Use scratch registers to store wake reason
     watchdog_hw->scratch[RP_WKUP_SCRATCH_REG] = _get_wakeup_cause();
+    alarm_pin_pinalarm_save_wake_pin();
 
     // Just before reset, enable the pinalarm interrupt.
     alarm_pin_pinalarm_entering_deep_sleep();

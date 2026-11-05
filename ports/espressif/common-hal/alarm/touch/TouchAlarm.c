@@ -9,6 +9,7 @@
 #include "shared-bindings/microcontroller/__init__.h"
 #include "shared-bindings/microcontroller/Pin.h"
 
+#include "bindings/espidf/__init__.h"
 #include "esp_sleep.h"
 #include "peripherals/touch.h"
 #include "supervisor/port.h"
@@ -92,7 +93,7 @@ void alarm_touch_touchalarm_set_alarm(const bool deep_sleep, const size_t n_alar
     // Initialize all touch channels used for alarms
     for (uint8_t i = TOUCH_MIN_CHAN_ID; i <= TOUCH_MAX_CHAN_ID; i++) {
         if ((touch_channel_mask & (1 << i)) != 0) {
-            peripherals_touch_init(i);
+            CHECK_ESP_RESULT(peripherals_touch_init(i));
         }
     }
 
@@ -209,6 +210,22 @@ bool alarm_touch_touchalarm_woke_this_cycle(void) {
 
 void alarm_touch_touchalarm_reset(void) {
     woke_up = false;
+
+    // Release claimed pin(s), mirroring alarm_pin_pinalarm_reset(). Without this, the pin
+    // stays marked "in use" after light_sleep_until_alarms() returns.
+    if (touch_channel_mask) {
+        for (size_t i = 0; i < mcu_pin_globals.map.used; i++) {
+            const mcu_pin_obj_t *pin_obj = MP_OBJ_TO_PTR(mcu_pin_globals.map.table[i].value);
+            if (pin_obj->touch_channel != NO_TOUCH_CHANNEL && (touch_channel_mask & (1 << pin_obj->touch_channel)) != 0) {
+                reset_pin_number(pin_obj->number);
+            }
+        }
+    }
+
     touch_channel_mask = 0;
+
+    // Tear down the channel(s) this alarm configured. Without this, a TouchIn built after
+    // wake would reuse this alarm's sleep-tuned threshold instead of getting a fresh one.
     peripherals_touch_never_reset(false);
+    peripherals_touch_reset();
 }

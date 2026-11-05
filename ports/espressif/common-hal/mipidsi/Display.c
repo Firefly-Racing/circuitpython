@@ -11,6 +11,7 @@
 #include "shared-bindings/microcontroller/Pin.h"
 #include "shared-bindings/time/__init__.h"
 #include "bindings/espidf/__init__.h"
+#include <math.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_heap_caps.h>
 #include "py/runtime.h"
@@ -37,7 +38,8 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
     mp_uint_t vsync_pulse_width,
     mp_uint_t vsync_back_porch,
     mp_uint_t vsync_front_porch,
-    mp_uint_t pixel_clock_frequency) {
+    mp_uint_t pixel_clock_frequency,
+    bool low_power_blanking) {
     self->bus = bus;
     self->virtual_channel = virtual_channel;
     self->width = width;
@@ -45,10 +47,12 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
     self->rotation = rotation;
     self->color_depth = color_depth;
     self->native_frames_per_second = native_frames_per_second;
+    self->pixel_clock_frequency = pixel_clock_frequency;
     self->backlight_on_high = backlight_on_high;
     self->framebuffer = NULL;
     self->dbi_io_handle = NULL;
     self->dpi_panel_handle = NULL;
+    self->backlight_inout.base.type = &mp_type_NoneType;
 
     // Create the DBI interface for sending commands
     esp_lcd_dbi_io_config_t dbi_config = {
@@ -90,7 +94,7 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
             .vsync_front_porch = vsync_front_porch,
         },
         .flags = {
-            .disable_lp = false,
+            .disable_lp = !low_power_blanking,
         },
     };
 
@@ -98,6 +102,12 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
     if (ret != ESP_OK) {
         common_hal_mipidsi_display_deinit(self);
         CHECK_ESP_RESULT(ret);
+    }
+
+    // The DPI divider is an integer, so record the clock it really produces.
+    float pixel_clock_mhz = 0;
+    if (esp_lcd_dpi_panel_get_pixel_clock(self->dpi_panel_handle, &pixel_clock_mhz) == ESP_OK) {
+        self->pixel_clock_frequency = (mp_uint_t)lroundf(pixel_clock_mhz * 1000000.0f);
     }
 
     // Get the framebuffer allocated by the driver
@@ -141,8 +151,12 @@ void common_hal_mipidsi_display_construct(mipidsi_display_obj_t *self,
         CHECK_ESP_RESULT(ret);
     }
 
+    // Send display-ON (0x29) after the DPI/video stream is running, matching
+    // the reference BSP flow order.
+    esp_lcd_panel_io_tx_param(self->dbi_io_handle, 0x29, NULL, 0);
+    common_hal_time_delay_ms(20);
+
     // Setup backlight PWM if pin is provided
-    self->backlight_inout.base.type = &mp_type_NoneType;
     if (backlight_pin != NULL && common_hal_mcu_pin_is_free(backlight_pin)) {
         #if (CIRCUITPY_PWMIO)
         pwmout_result_t result = common_hal_pwmio_pwmout_construct(&self->backlight_pwm, backlight_pin, 0, 50000, false);
@@ -223,6 +237,27 @@ void common_hal_mipidsi_display_refresh(mipidsi_display_obj_t *self) {
     // sends data from the framebuffer to the display
 }
 
+void common_hal_mipidsi_display_refresh_rows(mipidsi_display_obj_t *self, const uint8_t *dirty_row_bitmap) {
+    if (dirty_row_bitmap == NULL) {
+        common_hal_mipidsi_display_refresh(self);
+        return;
+    }
+    // Drawing from the framebuffer itself only writes the cache back for the given rows,
+    // so write back just the runs of dirty rows instead of the whole frame.
+    mp_uint_t y = 0;
+    while (y < self->height) {
+        if ((dirty_row_bitmap[y / 8] & (1 << (y & 7))) == 0) {
+            y++;
+            continue;
+        }
+        mp_uint_t start = y;
+        while (y < self->height && (dirty_row_bitmap[y / 8] & (1 << (y & 7))) != 0) {
+            y++;
+        }
+        esp_lcd_panel_draw_bitmap(self->dpi_panel_handle, 0, start, self->width, y, self->framebuffer);
+    }
+}
+
 mp_float_t common_hal_mipidsi_display_get_brightness(mipidsi_display_obj_t *self) {
     return self->current_brightness;
 }
@@ -271,6 +306,10 @@ int common_hal_mipidsi_display_get_row_stride(mipidsi_display_obj_t *self) {
 
 int common_hal_mipidsi_display_get_color_depth(mipidsi_display_obj_t *self) {
     return self->color_depth;
+}
+
+mp_uint_t common_hal_mipidsi_display_get_pixel_clock_frequency(mipidsi_display_obj_t *self) {
+    return self->pixel_clock_frequency;
 }
 
 int common_hal_mipidsi_display_get_native_frames_per_second(mipidsi_display_obj_t *self) {
